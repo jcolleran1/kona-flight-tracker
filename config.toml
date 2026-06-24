@@ -1,0 +1,53 @@
+# Flight Tracker configuration
+# All units noted per-field. Nothing is hardcoded in source.
+
+[location]
+# Home point — where the compass/distance/bearing are measured FROM, and the
+# center of the range rings on the map. Decimal degrees.
+# Default: Kona International (KOA). Set to the actual house.
+lat = 19.7388
+lon = -156.0456
+
+[fetch]
+source = "airplanes_live"   # only built-in source for now; see fetch/sources.py
+radius_nm = 40              # search radius in nautical miles (covers the Big Island)
+interval_seconds = 15       # poll interval; airplanes.live allows 1 req/sec, stay way under
+timeout_seconds = 10        # HTTP timeout
+stale_after_seconds = 90    # show staleness indicator after this
+watchdog_seconds = 300      # restart fetch thread if no update for this long
+
+[display]
+width = 1920                # set to your monitor's native resolution
+height = 1080
+fps = 6                     # render loop frame rate; 5-10 is plenty
+units = "imperial"          # "imperial" (mi, ft, mph) or "metric" (km, m, km/h)
+max_rows = 7                # max aircraft rows in the left-panel table (excluding hero)
+fullscreen = true           # true on the Pi; false for windowed dev on a laptop
+
+[quiet_hours]
+enabled = true
+start = "22:00"             # local time, 24h format
+end = "07:00"
+brightness = 0.30          # global brightness multiplier during quiet hours (0.0-1.0)
+
+[map]
+# RIGHT-HALF MAP. This is the calibrated panel from your original Kona tracker.
+enabled = true
+# Map image for the right 960x1080 half. A bare filename loads from data/;
+# an absolute path (e.g. "/home/colleran/kona-tracker/big_island_map.png")
+# loads your own calibrated map. A stylized Big Island is bundled as default.
+image = "big_island_map.png"
+# Geographic bounds of the map image edges — THESE are your calibration.
+# Carried over verbatim from your original main.py. Nudge if planes sit offshore.
+lat_max = 20.25            # top edge of the image
+lat_min = 18.85            # bottom edge
+lon_min = -156.35          # left edge
+lon_max = -155.35          # right edge
+# Aircraft icon. Bare name -> data/; absolute path -> your own plane.png.
+# If the file is missing, a clean vector plane is drawn instead (never breaks).
+plane_icon = "plane.png"
+plane_size = 34            # icon size in px (square, before rotation)
+show_range_rings = true    # concentric distance rings centered on home
+range_ring_nm = 10         # spacing between rings, nautical miles
+show_home = true           # marker at the home lat/lon
+show_labels = true         # callsign label next to each aircraft on the map

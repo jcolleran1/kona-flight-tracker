@@ -1,0 +1,6 @@
+[Unit]
+Description=Restart the flight tracker service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/systemctl restart aircraft.service

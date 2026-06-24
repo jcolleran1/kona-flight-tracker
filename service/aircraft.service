@@ -1,0 +1,20 @@
+[Unit]
+Description=Flight tracker wall display
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=colleran
+WorkingDirectory=/home/colleran/flight-tracker
+ExecStart=/usr/bin/python3 /home/colleran/flight-tracker/app.py
+Restart=always
+RestartSec=10
+# journald only; cap is set in /etc/systemd/journald.conf (see README)
+StandardOutput=journal
+StandardError=journal
+# kmsdrm needs these groups; the install steps in README add the user to them
+SupplementaryGroups=video render input
+
+[Install]
+WantedBy=multi-user.target

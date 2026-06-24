@@ -1,0 +1,30 @@
+icao,name
+# Your hand-curated airline names. These WIN over the bundled OpenFlights
+# airlines.csv, which has a few wrong/stale Hawaii entries (it lists MKA as
+# "MK Airline" and AAH as defunct passenger "Aloha Airlines"). Edit freely:
+# whatever you actually see mislabeled on the board, fix it here by ICAO
+# callsign prefix. One row per carrier.
+HAL,Hawaiian Air
+SWA,Southwest
+MKA,Mokulele
+AAH,Aloha Cargo
+TPA,Transair (Cargo)
+ASA,Alaska Airlines
+UAL,United Airlines
+DAL,Delta Air Lines
+AAL,American Airlines
+JBU,JetBlue
+FFT,Frontier
+NKS,Spirit
+JAL,Japan Airlines
+ANA,All Nippon Airways
+ACA,Air Canada
+WJA,WestJet
+QFA,Qantas
+ANZ,Air New Zealand
+KAL,Korean Air
+FDX,FedEx Express
+UPS,UPS Airlines
+ABX,ABX Air
+GTI,Atlas Air
+PAC,Polar Air Cargo
