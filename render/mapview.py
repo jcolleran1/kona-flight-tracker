@@ -181,7 +181,7 @@ class MapView:
             if pos is None:
                 continue
             is_hero = ac.hex == hero_hex
-            label = ac.callsign or ac.hex.upper()
+            label = ac.callsign or ac.registration or ac.hex.upper()
             if not label:
                 continue
             font = t.map_label_bold if is_hero else t.map_label

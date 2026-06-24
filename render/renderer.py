@@ -135,7 +135,7 @@ class Renderer:
         u = t.u
         pad = int(46 * u)
 
-        callsign = ac.callsign or ac.hex.upper()
+        callsign = ac.callsign or ac.registration or ac.hex.upper()
         t.blit_text(s, callsign[:12], t.hero_callsign, WHITE_WARM, (pad, int(18 * u)))
 
         ident = " / ".join(x for x in (ac.airline, ac.type_name or ac.type_code) if x)
@@ -195,7 +195,7 @@ class Renderer:
                 changed_at = seen[1]
             color = WHITE_WARM if (now - changed_at) < PULSE_SECONDS else AMBER
 
-            cs = ac.callsign or ac.hex.upper()
+            cs = ac.callsign or ac.registration or ac.hex.upper()
             t.blit_text(s, cs[:8], t.row_bold, color, (x_flight, top))
             t.blit_text(s, (ac.airline or "—")[:18].upper(), t.row, color, (x_airline, top))
             t.blit_text(s, fmt_altitude(ac.altitude_ft, ac.on_ground, self.cfg.units),
@@ -262,7 +262,7 @@ class Renderer:
             return
 
         cls = movement_class(featured)
-        callsign = featured.callsign or featured.hex.upper()
+        callsign = featured.callsign or featured.registration or featured.hex.upper()
 
         if cls == "departing":
             accent, word = CORAL, "DEPARTING"

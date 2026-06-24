@@ -26,6 +26,7 @@ class Aircraft:
     distance_nm: float       # from home
     bearing_deg: float       # from home, true
     trend: str               # "approaching" | "departing" | "" (unknown/first sight)
+    registration: str = ""   # tail number from the feed (e.g. "N41140"), may be ""
     # route (filled only for the featured flight; from adsbdb, may stay blank)
     origin_code: str = ""
     origin_name: str = ""

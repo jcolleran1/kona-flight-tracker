@@ -31,6 +31,7 @@ def parse_record(raw: dict, cfg: Config, lookups: Lookups, trends: TrendTracker)
 
     hex_id = str(raw.get("hex", "")).strip()
     callsign = str(raw.get("flight", "") or "").strip()
+    registration = str(raw.get("r", "") or "").strip()
 
     alt = raw.get("alt_baro")
     on_ground = alt == "ground"
@@ -63,11 +64,12 @@ def parse_record(raw: dict, cfg: Config, lookups: Lookups, trends: TrendTracker)
         distance_nm=dist,
         bearing_deg=brg,
         trend=trend,
+        registration=registration,
     )
 
 
 def fetch_once(source, cfg: Config, lookups: Lookups, trends: TrendTracker,
-               routes=None) -> list[Aircraft]:
+               routes=None, aircraftdb=None) -> list[Aircraft]:
     raw_list = source.fetch()
     aircraft = []
     for raw in raw_list:
@@ -80,6 +82,29 @@ def fetch_once(source, cfg: Config, lookups: Lookups, trends: TrendTracker,
             aircraft.append(ac)
     aircraft.sort(key=lambda a: a.distance_nm)
     trends.prune({a.hex for a in aircraft})
+
+    if aircraftdb is not None:
+        from enrich.motion import select_featured
+        featured = select_featured(aircraft)
+
+        # Fill airline/registration from the hex for any plane still missing an
+        # airline whose hex is ALREADY cached — free, no network call.
+        for ac in aircraft:
+            if ac.airline:
+                continue
+            info = aircraftdb.cached(ac.hex)
+            if info:
+                ac.airline = ac.airline or info.get("airline", "")
+                ac.registration = ac.registration or info.get("registration", "")
+
+        # One live lookup per poll, for the featured flight only, so the hero
+        # panel names the operator even before the callsign arrives. Bounded
+        # and cached; the result also benefits the table on later polls.
+        if featured is not None and not featured.airline and featured.hex:
+            info = aircraftdb.lookup(featured.hex)
+            if info:
+                featured.airline = info.get("airline", "")
+                featured.registration = featured.registration or info.get("registration", "")
 
     # Resolve the city pair for the one featured flight (cheap, cached).
     if routes is not None:
@@ -100,13 +125,15 @@ def run(state: SharedState, cfg: Config, stop: threading.Event) -> None:
     trends = TrendTracker()
     from enrich.routes import RouteLookup
     routes = RouteLookup(timeout=min(cfg.timeout_seconds, 5.0))
+    from enrich.aircraftdb import AircraftLookup
+    aircraftdb = AircraftLookup(timeout=min(cfg.timeout_seconds, 5.0))
     source = make_source(cfg.source, cfg.lat, cfg.lon, cfg.radius_nm, cfg.timeout_seconds)
     log.info("fetch thread up: %s every %ss", cfg.source, cfg.interval_seconds)
 
     failures = 0
     while not stop.is_set():
         try:
-            aircraft = fetch_once(source, cfg, lookups, trends, routes)
+            aircraft = fetch_once(source, cfg, lookups, trends, routes, aircraftdb)
             state.publish_success(aircraft)
             if failures:
                 log.info("recovered after %d failures", failures)
