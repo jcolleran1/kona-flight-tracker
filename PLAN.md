@@ -51,8 +51,8 @@ Ask these up front; don't guess.
 | 1 Data correctness | done | see below |
 | 2 Coverage | done (code) | airplanes.live + adsb.fi merged by default; adsb.lol and local receiver written, off |
 | 3 UI polish | built, awaiting Josh's OK | previews in `previews/`; nothing here is final until approved |
-| 4 Appliance hardening | not started | |
-| 5 Optional extras | not started | |
+| 4 Appliance hardening | done (code); needs one run of `tools/install.sh` on the Pi | see below |
+| 5 Optional extras | not started | waiting until 0-4 have run on the Pi |
 
 **Phase 1 as built** (anything that differs from the plan text below):
 
@@ -132,6 +132,33 @@ Waiting on Josh:
    `[map] icon_shapes = true`). Off by default.
 3. Banner removal, as described above.
 4. 12-hour clock (`[display] clock_24h = false`, shown in `takeoff-15.png`).
+
+**Phase 4 as built:**
+
+- One launcher: `tools/run.sh`, started from `~/.config/labwc/autostart`.
+  `tools/install.sh` writes that entry and comments out the older `app.py`
+  entries in both the labwc and lxsession autostart files (with `.bak`
+  copies). A systemd user service was the other option in the plan; the
+  autostart entry was chosen because it is the path already proven to inherit
+  the display on this Pi, and `run.sh` supplies the restart-on-exit behaviour.
+  The old system-level `service/` units are removed: they targeted kmsdrm, not
+  the labwc session the Pi runs.
+- Single-instance lock (`flock` in `$XDG_RUNTIME_DIR`), exit code 3 if taken.
+- `tools/update.sh`: fast-forward pull, tests, self-test, then SIGHUP the app;
+  rolls back and leaves the display alone if a check fails.
+- `python3 app.py --selftest` (add `--offline` to skip the network).
+- Memory: every cache is bounded; RSS is logged hourly; passing
+  `[appliance] max_rss_mb` (300) exits with "restart me". This replaces the
+  nightly restart timer.
+- `tools/compare.py` logs once a second what the wall shows, for the FR24
+  acceptance test below.
+- README rewritten around the Zero 2 W.
+- Not verified on hardware: nothing in Phase 4 has run on the Pi yet. The
+  launcher, installer and updater are covered by tests that run them against
+  stub commands, which is not the same thing. First run on the Pi should be
+  done with someone in the room.
+- Still Josh's to do: confirm the old AirLabs key from commit `d2abfc2` was
+  rotated (audit H).
 
 ---
 

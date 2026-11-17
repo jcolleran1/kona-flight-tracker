@@ -86,6 +86,8 @@ class Config:
     fullscreen: bool
     timezone: str
     clock_24h: bool
+    # --- appliance ---
+    max_rss_mb: float
     # --- quiet hours ---
     quiet_enabled: bool
     quiet_start: dt.time
@@ -224,6 +226,7 @@ def load_config(path: Path | None = None, local: Path | None | bool = None) -> C
     local_rx = _Section(raw, "local_receiver")
     alt, cls, motion = _Section(raw, "altitude"), _Section(raw, "classify"), _Section(raw, "motion")
     disp, quiet, mp = _Section(raw, "display"), _Section(raw, "quiet_hours"), _Section(raw, "map")
+    appl = _Section(raw, "appliance")
 
     if "lat" not in loc.table or "lon" not in loc.table:
         raise ConfigError("[location] needs both lat and lon")
@@ -274,6 +277,7 @@ def load_config(path: Path | None = None, local: Path | None | bool = None) -> C
         fullscreen=disp.flag("fullscreen", True),
         timezone=timezone,
         clock_24h=disp.flag("clock_24h", True),
+        max_rss_mb=appl.num("max_rss_mb", 300, 0, 4096),
         quiet_enabled=quiet.flag("enabled", True),
         quiet_start=quiet.clock("start", "22:00"),
         quiet_end=quiet.clock("end", "07:00"),

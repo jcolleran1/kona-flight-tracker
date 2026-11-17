@@ -8,3 +8,4 @@ config.local.toml
 data/fixtures/live/
 # preview renders (tools/preview.py)
 previews/
+compare-*.csv

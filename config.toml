@@ -93,6 +93,12 @@ fullscreen = true                 # true on the Pi; false for windowed dev on a 
 timezone = "Pacific/Honolulu"     # the clock and quiet hours use this, not the Pi's own setting
 clock_24h = true
 
+[appliance]
+# Memory backstop. Use is logged once an hour; if it ever passes this many MB
+# the app exits and the launcher restarts it. Normal use is well under 150 MB.
+# 0 turns the check off.
+max_rss_mb = 300
+
 [quiet_hours]
 enabled = true
 start = "22:00"                   # local time in [display] timezone, 24h format

@@ -2,21 +2,30 @@
 """Flight tracker entry point.
 
 Usage:
-  python3 app.py            # full dashboard (fullscreen on the Pi)
-  python3 app.py --once     # fetch once, print the enriched board to the terminal
-  python3 app.py --windowed # force windowed mode regardless of config
+  python3 app.py             # full dashboard (fullscreen on the Pi)
+  python3 app.py --once      # fetch once, print the enriched board to the terminal
+  python3 app.py --selftest  # check network, sources, clock, display, memory
+  python3 app.py --windowed  # force windowed mode regardless of config
+
+Exit codes (tools/run.sh acts on them): 0 quit on purpose, 2 bad config,
+3 another copy is already running, 75 "restart me".
 """
 from __future__ import annotations
 
 import argparse
 import logging
+import os
 import signal
 import sys
 import threading
 import time
 
+from appliance import (EXIT_ALREADY_RUNNING, EXIT_OK, EXIT_RESTART, MemoryWatch,
+                       SingleInstance, selftest)
 from config import ConfigError, load_config
 from state import SharedState
+
+os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")
 
 log = logging.getLogger("app")
 
@@ -118,8 +127,12 @@ class FetchSupervisor:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(description="Kona flight tracker wall display")
     parser.add_argument("--once", action="store_true", help="fetch once, print, exit")
+    parser.add_argument("--selftest", action="store_true",
+                        help="check everything the wall depends on, print pass/fail lines")
+    parser.add_argument("--offline", action="store_true",
+                        help="with --selftest: skip the network checks")
     parser.add_argument("--windowed", action="store_true", help="force windowed mode")
     args = parser.parse_args()
 
@@ -133,8 +146,18 @@ def main() -> int:
         import dataclasses
         cfg = dataclasses.replace(cfg, fullscreen=False)
 
+    if args.selftest:
+        return selftest(cfg, offline=args.offline)
     if args.once:
         return run_once(cfg)
+
+    # One copy per machine. A second launch (two autostart entries, or someone
+    # starting it by hand over SSH) exits here instead of fighting for the screen.
+    lock = SingleInstance()
+    if not lock.acquire():
+        log.error("another copy is already running (PID %s, lock %s); exiting",
+                  lock.holder_pid(), lock.path)
+        return EXIT_ALREADY_RUNNING
 
     from render.renderer import Renderer
 
@@ -143,19 +166,35 @@ def main() -> int:
     supervisor.start()
 
     stopping = threading.Event()
+    exit_code = [EXIT_OK]
 
     def _shutdown(signum, _frame):
-        log.info("signal %s: shutting down", signal.Signals(signum).name)
+        name = signal.Signals(signum).name
+        # SIGHUP = "restart with the new code" (tools/update.sh); the others = stop.
+        exit_code[0] = EXIT_RESTART if name == "SIGHUP" else EXIT_OK
+        log.info("signal %s: %s", name, "restarting" if exit_code[0] else "shutting down")
         stopping.set()
-    signal.signal(signal.SIGTERM, _shutdown)
-    signal.signal(signal.SIGINT, _shutdown)
+    for sig in ("SIGTERM", "SIGINT", "SIGHUP"):
+        if hasattr(signal, sig):
+            signal.signal(getattr(signal, sig), _shutdown)
 
-    renderer = Renderer(cfg, state, on_watchdog=supervisor.restart)
+    memory = MemoryWatch(cfg.max_rss_mb)
+
+    def housekeeping() -> None:
+        snap = state.read()
+        if memory.check(log, aircraft=len(snap.aircraft), frames=renderer.frames_painted):
+            log.error("memory ceiling passed (%.0f MB > %.0f MB): asking for a restart",
+                      memory.last_mb, cfg.max_rss_mb)
+            exit_code[0] = EXIT_RESTART
+            stopping.set()
+
+    renderer = Renderer(cfg, state, on_watchdog=supervisor.restart, on_tick=housekeeping)
     try:
         renderer.run(stop_check=stopping.is_set)
     finally:
         supervisor.stop()
-    return 0
+        lock.release()
+    return exit_code[0]
 
 
 if __name__ == "__main__":

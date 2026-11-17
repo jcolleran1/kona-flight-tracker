@@ -50,10 +50,11 @@ def pick_featured(snap: Snapshot, aircraft: list[Aircraft]) -> Aircraft | None:
 
 
 class Renderer:
-    def __init__(self, cfg: Config, state: SharedState, on_watchdog=None):
+    def __init__(self, cfg: Config, state: SharedState, on_watchdog=None, on_tick=None):
         self.cfg = cfg
         self.state = state
         self.on_watchdog = on_watchdog  # called when fetch looks dead
+        self.on_tick = on_tick          # called once per loop for housekeeping
         self._last_watchdog_fire = 0.0
         self._started = time.monotonic()
         self._last_frame_error = 0.0
@@ -203,4 +204,6 @@ class Renderer:
 
             if dirty:
                 pygame.display.update(dirty)
+            if self.on_tick:
+                self.on_tick()
             clock.tick(NIGHT_FPS if brightness < 0.999 else self.cfg.fps)
