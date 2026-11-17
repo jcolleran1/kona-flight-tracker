@@ -46,7 +46,8 @@ class _SourceState:
     def __init__(self, source, interval: float, first_due: float):
         self.source = source
         self.name = source.name
-        self.interval = max(interval, getattr(source, "min_interval", 0.0))
+        wanted = getattr(source, "poll_interval", None) or interval
+        self.interval = max(wanted, getattr(source, "min_interval", 0.0))
         self.next_due = first_due
         self.failures = 0
         self.last_ok: float | None = None

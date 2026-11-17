@@ -51,8 +51,8 @@ def test_map_bounds_contain_home(cfg):
     ("fps = 6", 'fps = "fast"', "fps"),
     ("fullscreen = true", 'fullscreen = "yes"', "fullscreen"),
     ('start = "22:00"', 'start = "10pm"', "start"),
-    ('sources = ["airplanes_live"]', 'sources = ["flightradar"]', "flightradar"),
-    ('sources = ["airplanes_live"]', 'sources = ["replay", "adsb_fi"]', "replay"),
+    ('sources = ["airplanes_live", "adsb_fi"]', 'sources = ["flightradar"]', "flightradar"),
+    ('sources = ["airplanes_live", "adsb_fi"]', 'sources = ["replay", "adsb_fi"]', "replay"),
     ("lat_max = 20.25", "lat_max = 10.0", "lat_min"),
     ("lat = 19.7388", "lat = 197.388", "lat"),
 ])

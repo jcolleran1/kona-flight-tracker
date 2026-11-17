@@ -5,11 +5,24 @@ ADSBExchange-v2 / readsb shape (airplanes.live and adsb.fi both use it), plus
 when it was received and how old it already was. Swap or add sources here
 without touching enrichment or rendering.
 
-Terms (re-check before changing anything here):
-  airplanes.live  https://airplanes.live/api-guide/  1 request/second,
-                  non-commercial, no SLA.
-  adsb.fi         https://github.com/adsbfi/opendata  1 request/second on the
-                  public endpoints, personal non-commercial use, must be cited.
+Terms, as read in November 2026. Re-read them before changing anything here.
+  airplanes.live  https://airplanes.live/api-guide/
+                  1 request/second, non-commercial use, no SLA. No key or
+                  feeder needed today ("that might change in the future").
+  adsb.fi         https://github.com/adsbfi/opendata
+                  Public endpoints: 1 request/second, personal non-commercial
+                  use only, adsb.fi must be cited with a link. Failed requests
+                  (4xx) count toward the limit.
+  adsb.lol        https://github.com/adsblol/api
+                  "Rate limits are dynamic based on the environment load. If
+                  you get 4xx errors, you are doing something wrong." An API
+                  key (earned by feeding) is planned; until then it is open.
+                  Polled no faster than every 10 s here to stay well clear.
+  local receiver  your own readsb / dump1090 / tar1090. No limits but your own.
+
+All of them are polled at [fetch] interval_seconds (5 s by default), far under
+every published limit, and any 401/403/429 puts that source to sleep (see
+fetch/worker.py) rather than retrying into a refusal.
 """
 from __future__ import annotations
 
@@ -55,7 +68,8 @@ class V2Source:
     """Shared behaviour for the ADSBExchange-v2 style point/radius endpoints."""
 
     kind = "network"
-    min_interval = 1.0          # seconds between requests the service allows
+    min_interval = 1.0          # never poll faster than this, whatever config says
+    poll_interval: float | None = None      # None = use [fetch] interval_seconds
     list_key = "ac"
     name = "v2"
     url = ""
@@ -114,12 +128,51 @@ class AdsbFiSource(V2Source):
         return f"{self.BASE}/lat/{lat:.6f}/lon/{lon:.6f}/dist/{radius_nm:g}"
 
 
+class AdsbLolSource(V2Source):
+    """GET /v2/point/{lat}/{lon}/{radius_nm}  (ADSBExchange-compatible)."""
+
+    name = "adsb_lol"
+    min_interval = 10.0
+    BASE = "https://api.adsb.lol/v2"
+
+    def build_url(self, lat, lon, radius_nm):
+        return f"{self.BASE}/point/{lat:.6f}/{lon:.6f}/{radius_nm:g}"
+
+
+class ReadsbSource(V2Source):
+    """A receiver on the local network: readsb, dump1090-fa or tar1090.
+
+        GET http://<host>:8080/data/aircraft.json
+        -> {"now": 1794880800.1, "messages": 123, "aircraft": [ {...}, ... ]}
+
+    Same per-aircraft fields as the aggregators (hex, flight, alt_baro, gs,
+    track, baro_rate, lat, lon, seen_pos, category...), minus the database
+    fields (registration, type, owner), which the merge fills in from the
+    other sources or adsbdb. Hears everything in line of sight with no network
+    delay, so it wins the merge while its position is fresh.
+    """
+
+    kind = "local"
+    name = "local"
+    min_interval = 1.0
+    list_key = "aircraft"
+
+    def __init__(self, url: str, timeout: float = 3.0, interval: float | None = None,
+                 name: str | None = None):
+        self.url = url
+        self.timeout = timeout
+        self.poll_interval = interval
+        if name:
+            self.name = name
+
+
 NETWORK_SOURCES = {
     "airplanes_live": AirplanesLiveSource,
     "adsb_fi": AdsbFiSource,
+    "adsb_lol": AdsbLolSource,
 }
 
-SOURCE_NAMES = sorted([*NETWORK_SOURCES, "replay"])
+SOURCE_NAMES = sorted([*NETWORK_SOURCES, "local", "replay"])
 
 
 def make_source(name: str, cfg):
@@ -127,6 +180,9 @@ def make_source(name: str, cfg):
     if name == "replay":
         from fetch.replay import ReplaySource
         return ReplaySource(recording=cfg.replay_file, speed=cfg.replay_speed)
+    if name == "local":
+        return ReadsbSource(cfg.local_url, timeout=min(cfg.timeout_seconds, 3.0),
+                            interval=cfg.local_interval_seconds)
     try:
         cls = NETWORK_SOURCES[name]
     except KeyError:

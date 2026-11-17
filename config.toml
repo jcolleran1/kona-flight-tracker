@@ -23,9 +23,17 @@ name = "Kona"
 elevation_ft = 47
 
 [fetch]
-# Live position sources, merged by aircraft. Options: "airplanes_live",
-# "adsb_fi". Use ["replay"] for offline development (never commit that).
-sources = ["airplanes_live"]
+# Live position sources. All listed sources are polled in turn and merged by
+# aircraft; the freshest position wins. More sources = better coverage near
+# Kona, where volunteer receivers are thin.
+#   "airplanes_live"  airplanes.live   (1 request/s allowed, non-commercial)
+#   "adsb_fi"         adsb.fi          (1 request/s allowed, personal use)
+#   "adsb_lol"        adsb.lol         (no fixed limit; polled every 10 s)
+#   "local"           your own receiver, see [local_receiver]
+#   "replay"          offline development only, alone. Never commit that.
+# Check that a source works from this network with `python3 app.py --once`
+# before adding it. A source that fails just backs off; it can't hurt the rest.
+sources = ["airplanes_live", "adsb_fi"]
 radius_nm = 40                    # search radius, nautical miles
 interval_seconds = 5              # poll interval per source (the feeds allow 1 request/second)
 timeout_seconds = 8               # HTTP timeout
@@ -37,6 +45,13 @@ show_anonymous = false            # TIS-B targets with no identity (jumpy, often
 # scripted scenario. A bare name loads from data/.
 replay_file = "fixtures/kona_scenario.jsonl.gz"
 replay_speed = 1.0                # 2.0 = twice real time
+
+[local_receiver]
+# An RTL-SDR running readsb / dump1090-fa / tar1090, on this Pi or another box
+# on the LAN. Only used when "local" is in [fetch] sources. Local data wins the
+# merge while it is fresh. See the README for hardware and setup.
+url = "http://127.0.0.1:8080/data/aircraft.json"
+interval_seconds = 2
 
 [enrich]
 # Background lookups: routes and airframes from adsbdb.com, the altimeter

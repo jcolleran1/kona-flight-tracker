@@ -1,0 +1,13 @@
+{
+  "now": 1794880800.1,
+  "messages": 2718281,
+  "aircraft": [
+    {"hex": "a5e2f1", "type": "adsb_icao", "flight": "ASA1121 ", "alt_baro": 2375, "alt_geom": 2600, "gs": 172.3, "track": 168.2, "baro_rate": -832, "squawk": "2153", "emergency": "none", "category": "A3", "nav_qnh": 1017.6, "lat": 19.8702, "lon": -156.0731, "nic": 8, "rc": 186, "seen_pos": 0.2, "version": 2, "nac_p": 9, "nac_v": 2, "sil": 3, "sil_type": "perhour", "mlat": [], "tisb": [], "messages": 1842, "seen": 0.1, "rssi": -4.2},
+    {"hex": "a0c7de", "type": "adsb_icao", "flight": "N130BH  ", "alt_baro": 600, "alt_geom": 800, "gs": 88.0, "track": 15.0, "baro_rate": 320, "category": "A7", "lat": 19.7650, "lon": -156.0300, "seen_pos": 0.6, "mlat": [], "tisb": [], "messages": 311, "seen": 0.4, "rssi": -11.8},
+    {"hex": "a9ed37", "type": "adsb_icao", "alt_baro": 1400, "gs": 108.8, "track": 240.8, "geom_rate": -384, "category": "A1", "lat": 19.8587, "lon": -155.9508, "seen_pos": 1.4, "mlat": [], "tisb": [], "messages": 96, "seen": 0.3, "rssi": -19.5},
+    {"hex": "ab6f0c", "type": "adsb_icao", "flight": "SWA1297 ", "alt_baro": "ground", "gs": 0.0, "category": "A3", "lat": 19.7362, "lon": -156.0403, "seen_pos": 3.0, "mlat": [], "tisb": [], "messages": 5120, "seen": 0.2, "rssi": -2.1},
+    {"hex": "a44444", "type": "mode_s", "alt_baro": 31000, "squawk": "4521", "mlat": [], "tisb": [], "messages": 41, "seen": 1.7, "rssi": -27.9},
+    {"hex": "a55555", "type": "adsb_icao", "flight": "UAL384  ", "alt_baro": 38000, "gs": 505.0, "track": 62.0, "category": "A5", "lat": 22.9100, "lon": -154.2000, "seen_pos": 0.9, "mlat": [], "tisb": [], "messages": 777, "seen": 0.5, "rssi": -24.4},
+    {"hex": "a66666", "type": "adsb_icao", "flight": "N818PH  ", "alt_baro": 9000, "gs": 210.0, "track": 90.0, "category": "A1", "lat": 19.6000, "lon": -156.2000, "seen_pos": 58.3, "mlat": [], "tisb": [], "messages": 20, "seen": 41.0, "rssi": -30.1}
+  ]
+}

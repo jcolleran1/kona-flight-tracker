@@ -32,7 +32,12 @@ def test_adsbdb_translation_fills_gaps_but_cannot_change_the_number():
     assert L.flight_number("UAL1759", "UA1759") == "UA1759"
     assert L.flight_number("UAL1759", "XX123") == "UA1759"       # different number: ignored
     assert L.flight_number("UAL1759", "garbage!") == "UA1759"
-    assert L.flight_number("ASA1121", "HA121") == "AS1121"       # hand-checked row wins
+    assert L.flight_number("ASA1121", "HA1121") == "AS1121"      # hand-checked row wins
+    # seen live: adsbdb answers "692" for STT692, an operator with no IATA code
+    assert L.flight_number("STT692", "692") == "STT692"
+    assert L.flight_number("QXQ692", "692") == "QXQ692"
+    assert L.flight_number("QXQ692", "12692") == "QXQ692"        # digits are not an airline code
+    assert L.flight_number("RCH321", "RC321") == "RCH321"        # deliberately blank in overrides
 
 
 def test_airline_names_and_overrides():

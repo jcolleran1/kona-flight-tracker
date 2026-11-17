@@ -26,7 +26,6 @@ CALLSIGN_RE = re.compile(r"^[A-Z0-9]{2,8}$")
 AIRLINE_FLIGHT_RE = re.compile(r"^([A-Z]{3})0*(\d{1,4})$")
 # anything that starts with a 3-letter airline prefix and then a digit
 AIRLINE_PREFIX_RE = re.compile(r"^([A-Z]{3})\d[A-Z0-9]*$")
-IATA_FLIGHT_RE = re.compile(r"^[A-Z0-9]{2}\d{1,4}[A-Z]?$")
 REGISTRATION_RE = re.compile(r"^[A-Z0-9][A-Z0-9-]{1,8}$")
 
 
@@ -188,9 +187,11 @@ class Lookups:
     def flight_number(self, callsign: str, callsign_iata: str = "") -> str:
         """What the wall shows as the flight: UA1759 for UAL1759.
 
-        `callsign_iata` is adsbdb's own translation, used when it looks sane
-        and agrees with ours on the airline. Anything that isn't a plain
-        airline + digits callsign is returned unchanged.
+        `callsign_iata` is adsbdb's own translation. It is used for airlines
+        the hand-checked list doesn't cover, and only when it is exactly a
+        two-character airline code followed by the same number (adsbdb sends
+        a bare "692" for operators with no IATA code). Anything that isn't a
+        plain airline + digits callsign is returned unchanged.
         """
         if not callsign:
             return ""
@@ -199,12 +200,17 @@ class Lookups:
             return callsign
         prefix, number = m.group(1), m.group(2)
         entry = self.airlines.get(prefix)
-        ours = f"{entry.iata}{number}" if entry and entry.iata else ""
+        if entry is not None and entry.curated:
+            # Hand-checked: its IATA code is the answer, and a blank one means
+            # "this operator has no flight numbers, show the callsign".
+            return f"{entry.iata}{number}" if entry.iata else callsign
         theirs = (callsign_iata or "").strip().upper()
-        if theirs and IATA_FLIGHT_RE.match(theirs) and theirs.endswith(number):
-            if not ours or (entry and not entry.curated):
-                return theirs
-        return ours or callsign
+        code = theirs[:-len(number)] if theirs.endswith(number) else ""
+        if len(code) == 2 and code.isalnum() and not code.isdigit():
+            return theirs                 # adsbdb's airline table is the more current one
+        if entry is not None and entry.iata:
+            return f"{entry.iata}{number}"
+        return callsign
 
     # ---- aircraft types ----
 

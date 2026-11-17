@@ -55,6 +55,9 @@ class Config:
     show_anonymous: bool
     replay_file: str
     replay_speed: float
+    # --- local receiver (only used when "local" is in sources) ---
+    local_url: str
+    local_interval_seconds: float
     # --- enrichment (adsbdb lookups, METAR) ---
     enrich_enabled: bool
     enrich_min_interval_seconds: float
@@ -215,6 +218,7 @@ def load_config(path: Path | None = None, local: Path | None | bool = None) -> C
 
     loc, apt = _Section(raw, "location"), _Section(raw, "airport")
     fetch, enrich = _Section(raw, "fetch"), _Section(raw, "enrich")
+    local_rx = _Section(raw, "local_receiver")
     alt, cls, motion = _Section(raw, "altitude"), _Section(raw, "classify"), _Section(raw, "motion")
     disp, quiet, mp = _Section(raw, "display"), _Section(raw, "quiet_hours"), _Section(raw, "map")
 
@@ -242,6 +246,8 @@ def load_config(path: Path | None = None, local: Path | None | bool = None) -> C
         show_anonymous=fetch.flag("show_anonymous", False),
         replay_file=fetch.text("replay_file", "fixtures/kona_scenario.jsonl.gz"),
         replay_speed=fetch.num("replay_speed", 1.0, 0.05, 60),
+        local_url=local_rx.text("url", "http://127.0.0.1:8080/data/aircraft.json").strip(),
+        local_interval_seconds=local_rx.num("interval_seconds", 2, 1, 60),
         enrich_enabled=enrich.flag("enabled", True),
         enrich_min_interval_seconds=enrich.num("min_interval_seconds", 2.0, 1, 600),
         metar_station=enrich.text("metar_station", "").strip().upper(),
@@ -282,6 +288,8 @@ def load_config(path: Path | None = None, local: Path | None | bool = None) -> C
         show_home=mp.flag("show_home", True),
         show_labels=mp.flag("show_labels", True),
     )
+    if "local" in cfg.sources and not cfg.local_url.startswith(("http://", "https://")):
+        raise ConfigError("[local_receiver] url must start with http:// or https://")
     if cfg.map_lat_min >= cfg.map_lat_max or cfg.map_lon_min >= cfg.map_lon_max:
         raise ConfigError("[map] lat_min/lon_min must be smaller than lat_max/lon_max")
     return cfg

@@ -160,6 +160,9 @@ class NetworkEnricher(NullEnricher):
         return w
 
     def idle(self) -> bool:
+        """Nothing left to fetch right now (used by --once to know when to print)."""
+        if self.metar_station and self._metar_due == 0.0:
+            return False                 # the first METAR hasn't been tried yet
         with self._lock:
             return not self._pending
 

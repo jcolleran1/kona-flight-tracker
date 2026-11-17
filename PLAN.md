@@ -49,7 +49,7 @@ Ask these up front; don't guess.
 |---|---|---|
 | 0 Safety net | done | `python3 -m pytest -q`; scripted Kona scenario replaces the Seattle sample |
 | 1 Data correctness | done | see below |
-| 2 Coverage | not started | |
+| 2 Coverage | done (code) | airplanes.live + adsb.fi merged by default; adsb.lol and local receiver written, off |
 | 3 UI polish | not started | previews go to Josh before anything is final |
 | 4 Appliance hardening | not started | |
 | 5 Optional extras | not started | |
@@ -80,6 +80,22 @@ Ask these up front; don't guess.
 - Aircraft beyond `radius_nm` are dropped even if a source reports them.
 - Enrichment requests go to adsbdb only for plain airline+number callsigns
   (routes) and for airframes whose feed record lacks a tail number or type.
+
+**Phase 2 as built:**
+
+- Default sources are `airplanes_live` + `adsb_fi`, each polled every 5 s,
+  staggered, merged by hex (freshest position wins, identity fields pooled).
+- `adsb_lol` is implemented but not enabled: it could not be reached from the
+  build machine (connection reset), so it is unverified. Its README says an API
+  key will be required in future; when that happens it should simply stay off.
+  Turn it on only after `python3 app.py --once` shows it answering from the Pi.
+- `local` reads a readsb / dump1090 / tar1090 `aircraft.json`. Tested against
+  `data/fixtures/readsb_aircraft.json`. Off until the hardware exists.
+- Not done: the measured CPU/RAM cost of readsb on the Zero 2 W (needs the
+  hardware). The README says how to measure it.
+- Per-source health is in every snapshot; the status strip draws it in Phase 3.
+- Found on live data while testing: adsbdb returns a bare `692` as the "IATA"
+  flight for operators with no IATA code. Fixed and pinned by a test.
 
 ---
 
