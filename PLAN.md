@@ -50,7 +50,7 @@ Ask these up front; don't guess.
 | 0 Safety net | done | `python3 -m pytest -q`; scripted Kona scenario replaces the Seattle sample |
 | 1 Data correctness | done | see below |
 | 2 Coverage | done (code) | airplanes.live + adsb.fi merged by default; adsb.lol and local receiver written, off |
-| 3 UI polish | built, awaiting Josh's OK | previews in `previews/`; nothing here is final until approved |
+| 3 UI polish | done | approved 2026-11-16: whole-island crop, no banner, aircraft-shaped icons, 12-hour clock |
 | 4 Appliance hardening | done (code); needs one run of `tools/install.sh` on the Pi | see below |
 | 5 Optional extras | not started | waiting until 0-4 have run on the Pi |
 
@@ -97,7 +97,7 @@ Ask these up front; don't guess.
 - Found on live data while testing: adsbdb returns a bare `692` as the "IATA"
   flight for operators with no IATA code. Fixed and pinned by a test.
 
-**Phase 3 as built (not final until Josh approves the previews):**
+**Phase 3 as built:**
 
 - Basemap baked by `tools/make_map.py` from Natural Earth 1:10m land polygons
   (public domain), lightly smoothed; runways to scale from OurAirports (public
@@ -126,19 +126,20 @@ Ask these up front; don't guess.
   poll); the map only when something moved a pixel; quiet-hours dimming is
   baked into the cached layers; 2 fps overnight.
 
-Waiting on Josh:
-1. Whole-island crop (default) or the tighter Kona-side crop (`crop-kona-15.png`).
-2. Aircraft-shaped icons for helicopters and light props (`shapes-15.png`,
-   `[map] icon_shapes = true`). Off by default.
-3. Banner removal, as described above.
-4. 12-hour clock (`[display] clock_24h = false`, shown in `takeoff-15.png`).
+Josh's decisions on the previews (2026-11-16):
+1. Whole-island crop: kept.
+2. Route banner removal: approved.
+3. Aircraft-shaped icons: ON by default (`[map] icon_shapes = true`).
+4. Clock: 12-hour (`[display] clock_24h = false`).
 
 **Phase 4 as built:**
 
 - One launcher: `tools/run.sh`, started from `~/.config/labwc/autostart`.
-  `tools/install.sh` writes that entry and comments out the older `app.py`
-  entries in both the labwc and lxsession autostart files (with `.bak`
-  copies). A systemd user service was the other option in the plan; the
+  `tools/install.sh` writes that entry and removes the older `app.py` launch
+  lines from both the labwc and lxsession autostart files, backing each file
+  up first. The lxsession line starts with `@`, which makes lxsession respawn
+  the program whenever it exits; left in place, the single-instance lock would
+  turn that into a respawn loop. A systemd user service was the other option in the plan; the
   autostart entry was chosen because it is the path already proven to inherit
   the display on this Pi, and `run.sh` supplies the restart-on-exit behaviour.
   The old system-level `service/` units are removed: they targeted kmsdrm, not

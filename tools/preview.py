@@ -5,7 +5,7 @@
     python3 tools/preview.py --count 15 --at 420 # one frame, 7 min into the scenario
     python3 tools/preview.py --count 15 --night  # quiet-hours brightness
     python3 tools/preview.py --count 15 --no-data --name nodata
-    python3 tools/preview.py --count 15 --icon-shapes --name shapes
+    python3 tools/preview.py --count 15 --plain-icons --name plain
     python3 tools/preview.py --out previews/     # where the PNGs go (default)
 
 Uses the bundled replay scenario and the real fetch -> enrich -> render path, so
@@ -109,19 +109,19 @@ def main() -> int:
     ap.add_argument("--at", type=float, default=460.0,
                     help="seconds into the scenario (default 460)")
     ap.add_argument("--out", type=Path, default=ROOT / "previews")
-    ap.add_argument("--icon-shapes", action="store_true",
-                    help="helicopter / light-prop silhouettes ([map] icon_shapes = true)")
+    ap.add_argument("--plain-icons", action="store_true",
+                    help="one plane icon for everything ([map] icon_shapes = false)")
     ap.add_argument("--night", action="store_true", help="quiet-hours brightness")
     ap.add_argument("--no-data", action="store_true", help="what a dead connection looks like")
-    ap.add_argument("--clock-12h", action="store_true", help="12-hour clock")
+    ap.add_argument("--clock-24h", action="store_true", help="24-hour clock")
     ap.add_argument("--name", default="preview", help="file name prefix")
     args = ap.parse_args()
 
     cfg = dataclasses.replace(load_config(local=False), sources=("replay",), fullscreen=False)
-    if args.icon_shapes:
-        cfg = dataclasses.replace(cfg, icon_shapes=True)
-    if args.clock_12h:
-        cfg = dataclasses.replace(cfg, clock_24h=False)
+    if args.plain_icons:
+        cfg = dataclasses.replace(cfg, icon_shapes=False)
+    if args.clock_24h:
+        cfg = dataclasses.replace(cfg, clock_24h=True)
     for n in (args.count or DEFAULT_COUNTS):
         path = render(cfg, args.at, n, args.out / f"{args.name}-{n:02d}.png",
                       night=args.night, no_data=args.no_data)

@@ -355,15 +355,27 @@ def test_icon_shapes_follow_the_emitter_category():
     assert icon_kind("A3") == "jet" and icon_kind("A5") == "jet" and icon_kind("") == "jet"
 
 
-def test_icon_shapes_option(replay_cfg, renderer):
+def test_icon_shapes_are_on_by_default_and_can_be_switched_off(replay_cfg, renderer):
     from render.mapview import MapView
-    heli = Aircraft(hex="h1", flight="N130BH", category="A7", lat=19.9, lon=-155.9,
-                    altitude_ft=1500.0, ground_speed_kt=100.0, track_deg=20.0, pos_mono=10.0,
-                    distance_nm=12.0)
-    assert [op[1] for op in renderer.mapview.build([heli], None, 10.0) if op[0] == "icon"] == ["jet"]
-    shaped = MapView(dataclasses.replace(replay_cfg, icon_shapes=True), 1920, 1080, renderer.theme)
-    assert [op[1] for op in shaped.build([heli], None, 10.0) if op[0] == "icon"] == ["heli"]
-    shaped.paint(renderer.screen, shaped.build([heli], None, 10.0))
+    assert replay_cfg.icon_shapes is True
+    fleet = [
+        Aircraft(hex="h1", flight="N130BH", category="A7", lat=19.9, lon=-155.9, altitude_ft=1500.0,
+                 ground_speed_kt=100.0, track_deg=20.0, pos_mono=10.0, distance_nm=12.0),
+        Aircraft(hex="p1", flight="N739HP", category="A1", lat=19.8, lon=-156.2, altitude_ft=1400.0,
+                 ground_speed_kt=110.0, track_deg=240.0, pos_mono=10.0, distance_nm=10.0),
+        Aircraft(hex="j1", flight="AS1121", category="A3", lat=20.0, lon=-156.3, altitude_ft=6000.0,
+                 ground_speed_kt=250.0, track_deg=130.0, pos_mono=10.0, distance_nm=21.0),
+    ]
+
+    def kinds(view):
+        return sorted(op[1] for op in view.build(fleet, None, 10.0) if op[0] == "icon")
+    assert kinds(renderer.mapview) == ["heli", "jet", "prop"]
+    renderer.mapview.paint(renderer.screen, renderer.mapview.build(fleet, None, 10.0))
+    plain = MapView(dataclasses.replace(replay_cfg, icon_shapes=False), 1920, 1080, renderer.theme)
+    assert kinds(plain) == ["jet", "jet", "jet"]
+    # shape is information only: the three movement colours are unchanged
+    colours = {op[2] for op in renderer.mapview.build(fleet, None, 10.0) if op[0] == "icon"}
+    assert colours == {op[2] for op in plain.build(fleet, None, 10.0) if op[0] == "icon"}
 
 
 def test_shipped_map_is_true_shape_and_matches_the_panel(cfg):

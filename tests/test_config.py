@@ -36,6 +36,9 @@ def test_decisions_from_plan(cfg):
     assert cfg.lon == pytest.approx(-156.0456, abs=0.01)
     assert (cfg.airport_iata, cfg.airport_icao) == ("KOA", "PHKO")
     assert (cfg.speed_units, cfg.distance_units, cfg.altitude_units) == ("kt", "mi", "ft")
+    # from the preview review: aircraft-shaped icons on, 12-hour clock, whole-island map
+    assert cfg.icon_shapes is True and cfg.clock_24h is False
+    assert (cfg.map_lat_min, cfg.map_lat_max) == (18.7, 20.5)
     assert cfg.is_home_airport("koa") and cfg.is_home_airport("PHKO")
     assert not cfg.is_home_airport("HNL") and not cfg.is_home_airport("")
 
@@ -71,6 +74,7 @@ def test_broken_toml_is_a_config_error(write):
 def test_minimal_file_gets_defaults(write):
     cfg = load_config(write("[location]\nlat = 19.7\nlon = -156.0\n"))
     assert cfg.sources == ("airplanes_live",) and cfg.interval_seconds == 5
+    assert cfg.icon_shapes is True and cfg.clock_24h is False     # defaults match the shipped file
     assert cfg.quiet_start == dt.time(22, 0)
     with pytest.raises(ConfigError):
         load_config(write("[display]\nfps = 6\n"))        # no location at all

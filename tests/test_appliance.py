@@ -261,25 +261,101 @@ def test_launcher_still_starts_the_app_when_the_journal_is_unavailable(sandbox):
 
 # ---- install.sh ----
 
-def test_install_is_idempotent_and_disables_old_entries(sandbox):
-    tmp, app, env, _ = sandbox
-    home = Path(env["HOME"])
+LXSESSION_BEFORE = """@lxpanel --profile LXDE-pi
+@pcmanfm --desktop --profile LXDE-pi
+@python3 /home/colleran/flight-tracker/app.py
+@xscreensaver -no-splash
+"""
+
+
+def install(sandbox):
+    _tmp, app, env, _ = sandbox
+    return subprocess.run(["/bin/sh", str(app / "tools/install.sh")], env=env, check=True,
+                          capture_output=True, text=True).stdout
+
+
+def autostart_files(sandbox):
+    home = Path(sandbox[2]["HOME"])
     labwc = home / ".config/labwc/autostart"
     lx = home / ".config/lxsession/LXDE-pi/autostart"
-    labwc.parent.mkdir(parents=True)
-    lx.parent.mkdir(parents=True)
-    labwc.write_text("sleep 5\npython3 /home/colleran/flight-tracker/app.py &\n")
-    lx.write_text("@lxpanel --profile LXDE-pi\n@python3 /home/colleran/flight-tracker/app.py\n")
-    for _ in range(3):
-        subprocess.run(["/bin/sh", str(app / "tools/install.sh")], env=env, check=True,
-                       capture_output=True)
-    text = labwc.read_text()
-    live = [ln for ln in text.splitlines() if ln.strip() and not ln.lstrip().startswith("#")]
-    assert live == ["sleep 5", f"{app}/tools/run.sh &"]       # exactly one launcher
-    assert "python3 /home/colleran/flight-tracker/app.py" in text         # old line kept, commented
-    lx_live = [ln for ln in lx.read_text().splitlines() if not ln.startswith("#")]
-    assert lx_live == ["@lxpanel --profile LXDE-pi"]
-    assert (labwc.parent / "autostart.bak").exists() and (lx.parent / "autostart.bak").exists()
+    labwc.parent.mkdir(parents=True, exist_ok=True)
+    lx.parent.mkdir(parents=True, exist_ok=True)
+    return labwc, lx
+
+
+def test_install_removes_the_respawning_lxsession_entry(sandbox):
+    """`@python3 .../app.py` in the lxsession autostart starts a second copy
+    and, because of the @, restarts it every time the instance lock makes it
+    exit. install.sh must take that line out, and only that line."""
+    labwc, lx = autostart_files(sandbox)
+    lx.write_text(LXSESSION_BEFORE)
+    out = install(sandbox)
+
+    after = lx.read_text()
+    assert "app.py" not in after                               # removed, not commented out
+    assert after == LXSESSION_BEFORE.replace("@python3 /home/colleran/flight-tracker/app.py\n", "")
+    backup = lx.with_name("autostart.bak")
+    assert backup.read_text() == LXSESSION_BEFORE              # the original, saved first
+    assert "removed the old app.py launch line" in out and str(backup) in out
+    # the only thing left that starts the app is the launcher, exactly once, in labwc
+    app = sandbox[1]
+    assert labwc.read_text().count(f"{app}/tools/run.sh &") == 1
+    assert "app.py" not in labwc.read_text()
+
+
+def test_install_twice_keeps_the_original_backup_and_adds_nothing(sandbox):
+    labwc, lx = autostart_files(sandbox)
+    lx.write_text(LXSESSION_BEFORE)
+    install(sandbox)
+    first_lx, first_labwc = lx.read_text(), labwc.read_text()
+    out = install(sandbox)
+    install(sandbox)
+    assert lx.read_text() == first_lx and labwc.read_text() == first_labwc
+    assert lx.with_name("autostart.bak").read_text() == LXSESSION_BEFORE
+    assert [p.name for p in lx.parent.iterdir()] .count("autostart.bak") == 1
+    assert len(list(lx.parent.iterdir())) == 2                 # autostart + the one backup
+    assert "launcher already present" in out
+
+
+def test_install_never_overwrites_the_first_backup(sandbox):
+    labwc, lx = autostart_files(sandbox)
+    lx.write_text(LXSESSION_BEFORE)
+    install(sandbox)
+    # someone puts the line back later and runs the installer again
+    lx.write_text(lx.read_text() + "@python3 /home/colleran/flight-tracker/app.py\n")
+    install(sandbox)
+    assert "app.py" not in lx.read_text()
+    assert lx.with_name("autostart.bak").read_text() == LXSESSION_BEFORE
+    assert len([p for p in lx.parent.iterdir() if p.name.startswith("autostart.bak.")]) == 1
+
+
+def test_install_removes_old_labwc_entry_too_and_leaves_other_lines(sandbox):
+    labwc, lx = autostart_files(sandbox)
+    labwc.write_text("sleep 5\npython3 /home/colleran/flight-tracker/app.py &\nwf-panel-pi &\n")
+    lx.write_text("@lxpanel --profile LXDE-pi\n   @python3.13 /home/colleran/flight-tracker/app.py\n")
+    install(sandbox)
+    app = sandbox[1]
+    live = [ln for ln in labwc.read_text().splitlines() if ln.strip() and not ln.startswith("#")]
+    assert live == ["sleep 5", "wf-panel-pi &", f"{app}/tools/run.sh &"]
+    assert lx.read_text() == "@lxpanel --profile LXDE-pi\n"
+    assert labwc.with_name("autostart.bak").read_text().count("app.py") == 1
+
+
+def test_install_with_no_autostart_files_at_all(sandbox):
+    home = Path(sandbox[2]["HOME"])
+    install(sandbox)
+    labwc = home / ".config/labwc/autostart"
+    assert labwc.read_text().count("tools/run.sh &") == 1
+    assert not (home / ".config/lxsession").exists()           # nothing created that wasn't needed
+    assert not labwc.with_name("autostart.bak").exists()
+
+
+def test_install_leaves_unrelated_python_programs_alone(sandbox):
+    labwc, lx = autostart_files(sandbox)
+    keep = "@python3 /home/colleran/weather/station.py\n@lxterminal\n"
+    lx.write_text(keep)
+    install(sandbox)
+    assert lx.read_text() == keep and not lx.with_name("autostart.bak").exists()
 
 
 # ---- update.sh ----

@@ -276,7 +276,7 @@ def load_config(path: Path | None = None, local: Path | None | bool = None) -> C
         max_rows=disp.num("max_rows", 8, 0, 40, integer=True),
         fullscreen=disp.flag("fullscreen", True),
         timezone=timezone,
-        clock_24h=disp.flag("clock_24h", True),
+        clock_24h=disp.flag("clock_24h", False),
         max_rss_mb=appl.num("max_rss_mb", 300, 0, 4096),
         quiet_enabled=quiet.flag("enabled", True),
         quiet_start=quiet.clock("start", "22:00"),
@@ -296,7 +296,7 @@ def load_config(path: Path | None = None, local: Path | None | bool = None) -> C
         show_labels=mp.flag("show_labels", True),
         show_trails=mp.flag("show_trails", True),
         show_offmap_pointers=mp.flag("show_offmap_pointers", True),
-        icon_shapes=mp.flag("icon_shapes", False),
+        icon_shapes=mp.flag("icon_shapes", True),
     )
     if "local" in cfg.sources and not cfg.local_url.startswith(("http://", "https://")):
         raise ConfigError("[local_receiver] url must start with http:// or https://")

@@ -91,7 +91,7 @@ altitude_units = "ft"             # "ft" or "m"
 max_rows = 7                      # max aircraft rows in the left-panel table (excluding the featured flight)
 fullscreen = true                 # true on the Pi; false for windowed dev on a laptop
 timezone = "Pacific/Honolulu"     # the clock and quiet hours use this, not the Pi's own setting
-clock_24h = true
+clock_24h = false                 # false = 4:38 PM, true = 16:38
 
 [appliance]
 # Memory backstop. Use is logged once an hour; if it ever passes this many MB
@@ -132,4 +132,4 @@ show_home = true                  # marker at the [location] point
 show_labels = true                # flight label next to each aircraft on the map
 show_trails = true                # fading track behind each airborne aircraft
 show_offmap_pointers = true       # edge chevron for tracked aircraft outside the map crop
-icon_shapes = false               # true = helicopters and light props get their own silhouettes
+icon_shapes = true                # helicopters and light props get their own silhouettes; false = one plane icon for all

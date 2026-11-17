@@ -12,6 +12,8 @@ process, pygame, 1920×1080, built to run unattended on a **Raspberry Pi Zero
 - **Right:** the Big Island with live aircraft. Three colours, on the map and
   in the text: **sand = on the ground, teal = toward Kona, coral = leaving
   Kona.** High overflights use the same colours, smaller and dimmer.
+  Helicopters and light props have their own silhouettes; colour still only
+  ever means movement.
 
 The rule the whole thing is built around: **never show wrong data; blank beats
 wrong.** A route that doesn't fit what the aircraft is doing is not shown. An
@@ -51,11 +53,11 @@ file is ignored by git, so updates never conflict with it.
 ```toml
 # ~/flight-tracker/config.local.toml
 [display]
-clock_24h = false        # 4:38 PM instead of 16:38
+clock_24h = true         # 16:38 instead of 4:38 PM
 max_rows = 6
 
 [map]
-icon_shapes = true       # helicopters and light props get their own silhouettes
+icon_shapes = false      # one plane icon for everything, helicopters included
 ```
 
 A typo gives a one-line message naming the section and key; the launcher keeps
@@ -103,10 +105,15 @@ Deploy keys). Never put a token in a file in this repo.
 ### What `install.sh` does
 
 There is exactly one way the display starts: `tools/run.sh`, launched from
-`~/.config/labwc/autostart`. `install.sh` adds that one line and comments out
-any older line that started `app.py` directly, in both the labwc and the
-lxsession autostart files (each changed file gets a `.bak` copy). It is safe
-to run again.
+`~/.config/labwc/autostart`. `install.sh` adds that one line and removes any
+older line that started `app.py` directly, in both the labwc and the lxsession
+autostart files. Each file it changes is copied to `autostart.bak` first. It
+is safe to run again.
+
+The lxsession line (`@python3 /home/colleran/flight-tracker/app.py`) has to go:
+the `@` makes lxsession restart the program whenever it exits, and a second
+copy exits immediately because of the lock below, so it would be respawned in
+a loop.
 
 `run.sh` runs the app inside the desktop session, sends its output to the
 system journal (no log files on the SD card), and restarts it if it exits
@@ -274,7 +281,7 @@ allow redistributing their data) and play back with
 
 | Tool | What it does |
 |---|---|
-| `tools/preview.py` | Renders preview PNGs through the real pipeline. `--night`, `--no-data`, `--icon-shapes`, `--count`, `--at`. |
+| `tools/preview.py` | Renders preview PNGs through the real pipeline. `--night`, `--no-data`, `--plain-icons`, `--clock-24h`, `--count`, `--at`. |
 | `tools/make_map.py` | Bakes `data/big_island_map.png` from the coastline data and the bounds in `config.toml`. `--fit 108` computes bounds with the right aspect ratio. `--land file.geojson` uses a more detailed coastline. |
 | `tools/make_scenario.py` | Regenerates the bundled replay scenario. |
 | `tools/make_airlines.py` | Regenerates `data/airlines.csv` from OpenFlights. |
