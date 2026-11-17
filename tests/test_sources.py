@@ -42,6 +42,34 @@ def test_adsb_lol_url_and_cautious_interval():
     assert src.min_interval >= 10.0
 
 
+def test_adsb_lol_parses_the_documented_v2_shape(served, cfg, monkeypatch):
+    with open(FIXTURES / "adsb_lol_point.json", encoding="utf-8") as f:
+        payload = json.load(f)
+    served["api.adsb.lol/v2/point"] = payload
+    monkeypatch.setattr(sources_mod.time, "time", lambda: payload["now"] / 1000 + 0.8)
+    poll = AdsbLolSource(cfg.lat, cfg.lon, cfg.radius_nm).fetch()
+    assert poll.source == "adsb_lol" and len(poll.aircraft) == 3
+    assert poll.age_seconds == pytest.approx(0.8)          # `now` is in milliseconds
+    now = poll.received_mono
+    out, _ = make_tracker(cfg).update(merge_polls([poll], now, 30.0), now)
+    by = {a.flight: a for a in out}
+    assert set(by) == {"AS1121", "RCH321"}                 # UPS34 is 40.7 nm out: past the radius
+    assert by["AS1121"].airline == "Hawaiian Airlines" and by["AS1121"].source == "adsb_lol"
+    assert by["RCH321"].pos_source == "mlat"
+
+
+def test_adsb_lol_refusal_puts_it_to_sleep_not_into_a_retry_loop(served, cfg):
+    """Its README: 'If you get 4xx errors, you are doing something wrong', and
+    an API key is planned. A 4xx must never be retried quickly."""
+    from fetch.worker import backoff_seconds
+    for status in (401, 403):
+        served["api.adsb.lol"] = FetchError(f"HTTP {status}", status=status)
+        with pytest.raises(FetchError) as e:
+            AdsbLolSource(cfg.lat, cfg.lon, cfg.radius_nm).fetch()
+        assert backoff_seconds(e.value, 1, 10.0) == 900.0
+    assert backoff_seconds(FetchError("HTTP 429", status=429), 1, 10.0) == 60.0
+
+
 def test_make_source_knows_every_configured_name(cfg):
     import dataclasses
     for name in ("airplanes_live", "adsb_fi", "adsb_lol", "local", "replay"):

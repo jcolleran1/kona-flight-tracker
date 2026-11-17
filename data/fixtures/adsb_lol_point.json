@@ -1,0 +1,13 @@
+{
+  "_comment": "Synthetic response in the shape adsb.lol documents for GET /v2/point/{lat}/{lon}/{radius}: the ADSBExchange v2 format (its README: 'compatible with the ADSBExchange Rapid API, a drop-in replacement'). Not recorded from the live service.",
+  "ac": [
+    {"hex": "a5e2f1", "type": "adsb_icao", "flight": "ASA1121 ", "r": "N479HA", "t": "B712", "alt_baro": 2375, "alt_geom": 2600, "gs": 172.3, "track": 168.2, "baro_rate": -832, "squawk": "2153", "emergency": "none", "category": "A3", "nav_qnh": 1017.6, "lat": 19.8702, "lon": -156.0731, "nic": 8, "rc": 186, "seen_pos": 0.4, "version": 2, "mlat": [], "tisb": [], "messages": 1842, "seen": 0.1, "rssi": -14.2, "dst": 8.03, "dir": 348.7},
+    {"hex": "a8d2e4", "type": "adsb_icao", "flight": "UPS34   ", "r": "N615UP", "t": "B748", "alt_baro": 37000, "alt_geom": 39100, "gs": 423.0, "track": 68.0, "baro_rate": 0, "category": "A5", "nav_qnh": 1013.6, "lat": 20.3000, "lon": -156.4500, "seen_pos": 1.1, "mlat": [], "tisb": [], "messages": 9120, "seen": 0.3, "rssi": -21.0, "dst": 40.7, "dir": 326.0},
+    {"hex": "ae1464", "type": "mlat", "flight": "RCH321  ", "t": "C17", "dbFlags": 1, "alt_baro": 24000, "gs": 387.0, "track": 84.0, "category": "A5", "mlat": ["lat", "lon", "gs", "track"], "tisb": [], "lat": 19.2000, "lon": -156.1000, "seen_pos": 6.2, "messages": 310, "seen": 0.2, "rssi": -27.9, "dst": 32.4, "dir": 185.4}
+  ],
+  "msg": "No error",
+  "now": 1794880800000,
+  "total": 3,
+  "ctime": 1794880800000,
+  "ptime": 0
+}
