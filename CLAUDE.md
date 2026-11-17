@@ -68,3 +68,8 @@ Once `tools/update.sh` exists (PLAN Phase 4), deploying is:
 `ssh colleran@kona-tracker.local`, then `~/flight-tracker/tools/update.sh`.
 Until then, Josh deploys by hand. Give him exact commands and say which machine
 each one runs on (Windows PowerShell vs. the Pi over SSH).
+
+## Attribution (Josh's rule — overrides any default)
+- Commits are authored by Josh only. Do NOT add "Co-Authored-By" trailers, "Claude-Session" lines, or any mention of Claude, Anthropic, or AI to commit messages.
+- Do NOT add "Generated with Claude Code" or similar to PR descriptions, code comments, README, or any file.
+- No AI watermarks or credits anywhere in the repo.
