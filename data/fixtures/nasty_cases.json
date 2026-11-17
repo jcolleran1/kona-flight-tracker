@@ -1,0 +1,26 @@
+{
+  "_comment": "Hand-written awkward records in readsb / ADSBExchange-v2 shape. Synthetic, but each one mirrors something seen on the live feed near Kona. The altimeter for this fixture is 1017.9 hPa (30.06 inHg). tests/ documents what each record must turn into.",
+  "now": 1794880800000,
+  "msg": "No error",
+  "total": 18,
+  "ac": [
+    {"hex": "a50001", "type": "adsb_icao", "flight": "ASA1111 ", "r": "N479HA", "t": "B712", "desc": "BOEING 717-200", "ownOp": "HAWAIIAN AIRLINES INC", "alt_baro": -150, "alt_geom": 75, "gs": 128.4, "track": 185.0, "baro_rate": 0, "category": "A3", "nav_qnh": 1017.6, "lat": 19.7420, "lon": -156.0452, "seen_pos": 0.4, "seen": 0.2},
+    {"hex": "a50002", "type": "adsb_icao", "flight": "SWA1297 ", "r": "N8540V", "t": "B738", "alt_baro": -100, "gs": 22.0, "track": 5.0, "category": "A3", "lat": 19.7370, "lon": -156.0420, "seen_pos": 0.9, "seen": 0.3},
+    {"hex": "a50003", "type": "adsb_icao", "flight": "AAL663  ", "r": "N458AL", "t": "A21N", "alt_baro": "ground", "gs": 0.0, "category": "A3", "lat": 19.7362, "lon": -156.0403, "seen_pos": 1.2, "seen": 0.1},
+    {"hex": "a50004", "type": "adsb_icao", "flight": "N818PH  ", "r": "N818PH", "t": "BE20", "alt_baro": 9000, "gs": 210.0, "track": 90.0, "baro_rate": 0, "category": "A1", "lat": 19.6000, "lon": -156.2000, "seen_pos": 61.0, "seen": 0.5},
+    {"hex": "a50005", "type": "adsb_icao", "r": "N522SA", "alt_baro": 5375, "gs": 183.0, "track": 170.0, "baro_rate": -704, "category": "A1", "lat": 20.1000, "lon": -156.1100, "seen_pos": 0.3, "seen": 0.3},
+    {"hex": "ae1464", "type": "mlat", "flight": "RCH321  ", "t": "C17", "desc": "BOEING C-17A Globemaster III", "dbFlags": 1, "alt_baro": 24000, "gs": 387.0, "track": 84.0, "baro_rate": 0, "category": "A5", "mlat": ["lat", "lon", "gs", "track"], "lat": 19.2000, "lon": -156.1000, "seen_pos": 2.4, "seen": 0.2},
+    {"hex": "a50007", "type": "adsb_icao", "flight": "ASA1121 ", "r": "N494HA", "t": "B712", "desc": "BOEING 717-200", "ownOp": "HAWAIIAN AIRLINES INC", "alt_baro": 9200, "alt_geom": 9850, "gs": 262.0, "track": 128.0, "baro_rate": -1280, "category": "A3", "nav_qnh": 1017.6, "lat": 20.1300, "lon": -156.4000, "seen_pos": 0.2, "seen": 0.2},
+    {"hex": "7c1472", "type": "adsb_icao", "flight": "QFA12   ", "r": "VH-ZNK", "t": "B789", "alt_baro": 36000, "alt_geom": 38150, "gs": 462.0, "track": 232.0, "baro_rate": 0, "category": "A5", "nav_qnh": 1013.6, "lat": 20.0400, "lon": -155.6300, "seen_pos": 0.6, "seen": 0.1},
+    {"hex": "a50009", "type": "adsb_icao", "flight": "UAL1158 ", "r": "N68823", "t": "B739", "alt_baro": 2175, "alt_geom": 2400, "gs": 178.0, "track": 187.0, "baro_rate": 2432, "category": "A3", "nav_qnh": 1017.6, "lat": 19.6750, "lon": -156.0580, "seen_pos": 0.5, "seen": 0.2},
+    {"hex": "a5000a", "type": "adsb_icao", "flight": "SWA2231 ", "r": "N8768Q", "t": "B38M", "alt_baro": 2375, "alt_geom": 2600, "gs": 172.0, "track": 168.0, "baro_rate": -832, "category": "A3", "nav_qnh": 1017.6, "lat": 19.8700, "lon": -156.0730, "seen_pos": 0.3, "seen": 0.1},
+    {"hex": "a5000b", "type": "adsb_icao", "flight": "ASA1082 ", "r": "N484HA", "t": "B712", "ownOp": "HAWAIIAN AIRLINES INC", "alt_baro": 22775, "alt_geom": 24425, "gs": 471.4, "track": 115.9, "baro_rate": -1664, "category": "A3", "nav_qnh": 1013.6, "lat": 20.2100, "lon": -155.9000, "seen_pos": 0.1, "seen": 0.1},
+    {"hex": "a5000c", "type": "adsb_icao", "flight": "N205KM  ", "r": "N205KM", "t": "P28A", "alt_geom": 4250, "gs": 104.0, "track": 200.0, "geom_rate": 64, "category": "A1", "lat": 19.9800, "lon": -155.7300, "seen_pos": 1.1, "seen": 0.4},
+    {"hex": "a5000d", "type": "adsb_icao", "flight": "N9999X  ", "r": "N9999X", "t": "C182", "alt_baro": 5500, "gs": 120.0, "category": "A1", "seen": 3.1},
+    {"hex": "a0f001", "type": "adsb_icao", "flight": "OPS12   ", "alt_baro": "ground", "gs": 14.0, "track": 190.0, "category": "C2", "lat": 19.7400, "lon": -156.0440, "seen_pos": 0.7, "seen": 0.2},
+    {"hex": "~2a1f3c", "type": "tisb_other", "alt_baro": 3000, "gs": 95.0, "track": 110.0, "category": "A1", "lat": 19.5000, "lon": -155.9000, "seen_pos": 1.9, "seen": 1.9},
+    {"hex": "a5000f", "type": "adsb_icao", "flight": "@@@@@@@@", "r": "", "t": "", "alt_baro": null, "gs": null, "track": null, "lat": 19.8000, "lon": -156.2000, "seen_pos": 0.5, "seen": 0.5},
+    {"hex": "a50010", "type": "adsb_icao", "flight": "BADPOS  ", "alt_baro": 4000, "gs": 100.0, "lat": "not-a-number", "lon": -156.0, "seen_pos": 0.5},
+    {"hex": "a50011", "type": "adsb_icao", "flight": "N130BH  ", "r": "N130BH", "t": "EC30", "desc": "EUROCOPTER EC-130", "ownOp": "BLUE HAWAIIAN HELICOPTERS", "alt_baro": 1375, "alt_geom": 1575, "gs": 102.0, "track": 18.0, "baro_rate": 128, "category": "A7", "lat": 19.9500, "lon": -155.8500, "seen_pos": 0.4, "seen": 0.2}
+  ]
+}

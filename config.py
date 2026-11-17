@@ -29,6 +29,8 @@ class Config:
     timeout_seconds: float
     stale_after_seconds: float
     watchdog_seconds: float
+    replay_file: str
+    replay_speed: float
     # display
     width: int
     height: int
@@ -78,6 +80,8 @@ def load_config(path: Path | None = None) -> Config:
         timeout_seconds=float(fetch.get("timeout_seconds", 10)),
         stale_after_seconds=float(fetch.get("stale_after_seconds", 90)),
         watchdog_seconds=float(fetch.get("watchdog_seconds", 300)),
+        replay_file=str(fetch.get("replay_file", "fixtures/kona_scenario.jsonl.gz")),
+        replay_speed=float(fetch.get("replay_speed", 1.0)),
         width=int(disp.get("width", 1920)),
         height=int(disp.get("height", 1080)),
         fps=int(disp.get("fps", 6)),

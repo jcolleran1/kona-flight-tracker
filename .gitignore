@@ -1,3 +1,10 @@
 __pycache__/
 *.pyc
 flight-tracker-backup-*/
+.pytest_cache/
+# local-only files: private settings and recorded live feed data (the feeds'
+# terms don't allow redistributing their data)
+config.local.toml
+data/fixtures/live/
+# preview renders (tools/preview.py)
+previews/

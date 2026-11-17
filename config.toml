@@ -9,12 +9,16 @@ lat = 19.7388
 lon = -156.0456
 
 [fetch]
-source = "airplanes_live"   # only built-in source for now; see fetch/sources.py
+source = "airplanes_live"   # "airplanes_live", "adsb_fi", or "replay" (offline dev)
 radius_nm = 40              # search radius in nautical miles (covers the Big Island)
 interval_seconds = 15       # poll interval; airplanes.live allows 1 req/sec, stay way under
 timeout_seconds = 10        # HTTP timeout
 stale_after_seconds = 90    # show staleness indicator after this
 watchdog_seconds = 300      # restart fetch thread if no update for this long
+# Replay mode (source = "replay"): plays a recording made by tools/record.py or
+# the bundled scripted scenario. A bare name loads from data/.
+replay_file = "fixtures/kona_scenario.jsonl.gz"
+replay_speed = 1.0          # 2.0 = twice real time
 
 [display]
 width = 1920                # set to your monitor's native resolution

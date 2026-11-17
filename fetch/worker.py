@@ -70,7 +70,7 @@ def parse_record(raw: dict, cfg: Config, lookups: Lookups, trends: TrendTracker)
 
 def fetch_once(source, cfg: Config, lookups: Lookups, trends: TrendTracker,
                routes=None, aircraftdb=None) -> list[Aircraft]:
-    raw_list = source.fetch()
+    raw_list = source.fetch().aircraft
     aircraft = []
     for raw in raw_list:
         try:
@@ -127,7 +127,7 @@ def run(state: SharedState, cfg: Config, stop: threading.Event) -> None:
     routes = RouteLookup(timeout=min(cfg.timeout_seconds, 5.0))
     from enrich.aircraftdb import AircraftLookup
     aircraftdb = AircraftLookup(timeout=min(cfg.timeout_seconds, 5.0))
-    source = make_source(cfg.source, cfg.lat, cfg.lon, cfg.radius_nm, cfg.timeout_seconds)
+    source = make_source(cfg.source, cfg)
     log.info("fetch thread up: %s every %ss", cfg.source, cfg.interval_seconds)
 
     failures = 0

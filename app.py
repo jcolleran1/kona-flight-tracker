@@ -37,7 +37,7 @@ def run_once(cfg) -> int:
     from fetch.worker import fetch_once
     from enrich.geo import compass_point
 
-    source = make_source(cfg.source, cfg.lat, cfg.lon, cfg.radius_nm, cfg.timeout_seconds)
+    source = make_source(cfg.source, cfg)
     try:
         aircraft = fetch_once(source, cfg, Lookups.load(), TrendTracker())
     except FetchError as e:
