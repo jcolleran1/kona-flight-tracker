@@ -31,35 +31,64 @@ from fetch.replay import ReplaySource  # noqa: E402
 DEFAULT_COUNTS = (0, 1, 5, 15)
 
 
-class LimitedReplay(ReplaySource):
-    """Replay frozen at one moment, trimmed to the first `count` aircraft."""
+class SimClock:
+    """A clock the preview advances by hand, so a scene 7 minutes into the
+    scenario renders in milliseconds and always comes out the same."""
 
-    def __init__(self, at: float, count: int | None):
-        super().__init__(start_at=at, clock=lambda: 0.0)
+    def __init__(self):
+        self.t = 0.0
+
+    def __call__(self) -> float:
+        return self.t
+
+
+class LimitedReplay(ReplaySource):
+    """The bundled scenario on a simulated clock, trimmed to `count` aircraft."""
+
+    def __init__(self, clock: SimClock, count: int | None, recording: str | None = None):
+        super().__init__(recording=recording, clock=clock)
+        self.sim = clock
         self.count = count
 
     def fetch(self):
         poll = super().fetch()
+        poll.received_mono = self.sim()
         if self.count is not None:
             poll.aircraft = poll.aircraft[:self.count]
         return poll
 
 
+def build_snapshot(cfg, at: float, count: int | None, warmup: float = 240.0):
+    """Run the real fetch -> merge -> enrich pipeline over the scenario up to
+    time `at` (so phases, trails and the featured pick have their history) and
+    return (snapshot, simulated monotonic time)."""
+    from fetch.worker import FetchLoop
+    from state import SharedState
+
+    clock = SimClock()
+    state = SharedState()
+    source = LimitedReplay(clock, count)
+    loop = FetchLoop(cfg, state, sources=[source], clock=clock)
+    t = max(0.0, at - warmup)
+    while True:
+        clock.t = t
+        for st in loop.sources:
+            st.next_due = t
+        loop.tick()
+        if t >= at:
+            break
+        t = min(at, t + cfg.interval_seconds)
+    return state.read(), clock.t
+
+
 def render(cfg, at: float, count: int | None, out: Path) -> Path:
-    from enrich.lookups import Lookups
-    from enrich.trend import TrendTracker
-    from fetch.worker import fetch_once
     from render.renderer import Renderer
     from state import SharedState
 
-    state = SharedState()
-    source = LimitedReplay(at, count)
-    aircraft = fetch_once(source, cfg, Lookups.load(), TrendTracker())
-    state.publish_success(aircraft)
-
-    renderer = Renderer(cfg, state)
+    snap, now = build_snapshot(cfg, at, count)
+    renderer = Renderer(cfg, SharedState())
     renderer.init_display()
-    renderer.draw_frame(state.read(), False)
+    renderer.draw_frame(snap, False, now + 1.0)   # one second after the last poll
     out.parent.mkdir(parents=True, exist_ok=True)
     pygame.image.save(renderer.screen, str(out))
     pygame.display.quit()
@@ -75,7 +104,7 @@ def main() -> int:
     ap.add_argument("--out", type=Path, default=ROOT / "previews")
     args = ap.parse_args()
 
-    cfg = dataclasses.replace(load_config(), source="replay", fullscreen=False)
+    cfg = dataclasses.replace(load_config(), sources=("replay",), fullscreen=False)
     for n in (args.count or DEFAULT_COUNTS):
         path = render(cfg, args.at, n, args.out / f"preview-{n:02d}.png")
         print(f"wrote {path}")

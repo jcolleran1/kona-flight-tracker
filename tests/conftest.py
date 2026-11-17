@@ -31,7 +31,7 @@ def _no_network(monkeypatch):
 @pytest.fixture(scope="session")
 def cfg():
     from config import load_config
-    return load_config()
+    return load_config(local=False)   # the committed file, not this machine's overlay
 
 
 @pytest.fixture(scope="session")

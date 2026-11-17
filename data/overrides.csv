@@ -1,30 +1,58 @@
-icao,name
-# Your hand-curated airline names. These WIN over the bundled OpenFlights
-# airlines.csv, which has a few wrong/stale Hawaii entries (it lists MKA as
-# "MK Airline" and AAH as defunct passenger "Aloha Airlines"). Edit freely:
-# whatever you actually see mislabeled on the board, fix it here by ICAO
-# callsign prefix. One row per carrier.
-HAL,Hawaiian Air
-SWA,Southwest
-MKA,Mokulele
-AAH,Aloha Cargo
-TPA,Transair (Cargo)
-ASA,Alaska Airlines
-UAL,United Airlines
-DAL,Delta Air Lines
-AAL,American Airlines
-JBU,JetBlue
-FFT,Frontier
-NKS,Spirit
-JAL,Japan Airlines
-ANA,All Nippon Airways
-ACA,Air Canada
-WJA,WestJet
-QFA,Qantas
-ANZ,Air New Zealand
-KAL,Korean Air
-FDX,FedEx Express
-UPS,UPS Airlines
-ABX,ABX Air
-GTI,Atlas Air
-PAC,Polar Air Cargo
+icao,iata,name
+# Hand-checked airlines. These WIN over the bundled OpenFlights airlines.csv,
+# which is no longer maintained and still lists carriers that stopped flying
+# years ago (Aloha Airlines passenger service, Island Air, ...).
+#
+# One row per carrier, keyed by the 3-letter ICAO callsign prefix:
+#   icao  callsign prefix as broadcast            (HAL in HAL21)
+#   iata  2-character code airports and FR24 show (HA in HA21); blank = show
+#         the callsign unchanged
+#   name  what the wall prints; leave BLANK to print no airline at all for
+#         that prefix (use this to silence a wrong OpenFlights entry)
+# Fix anything you see mislabeled on the wall by adding a row here.
+HAL,HA,Hawaiian Airlines
+ASA,AS,Alaska Airlines
+SWA,WN,Southwest
+UAL,UA,United Airlines
+DAL,DL,Delta Air Lines
+AAL,AA,American Airlines
+JBU,B6,JetBlue
+FFT,F9,Frontier
+NKS,NK,Spirit
+SCX,SY,Sun Country
+QXE,QX,Horizon Air
+SKW,OO,SkyWest
+ACA,AC,Air Canada
+ROU,RV,Air Canada Rouge
+WJA,WS,WestJet
+JAL,JL,Japan Airlines
+ANA,NH,All Nippon Airways
+TZP,ZG,ZIPAIR
+KAL,KE,Korean Air
+AAR,OZ,Asiana Airlines
+CPA,CX,Cathay Pacific
+PAL,PR,Philippine Airlines
+QFA,QF,Qantas
+JST,JQ,Jetstar
+ANZ,NZ,Air New Zealand
+FJI,FJ,Fiji Airways
+FDX,FX,FedEx Express
+UPS,5X,UPS Airlines
+ABX,GB,ABX Air
+GTI,5Y,Atlas Air
+PAC,PO,Polar Air Cargo
+ATN,8C,Air Transport International
+NCA,KZ,Nippon Cargo Airlines
+AAH,KH,Aloha Air Cargo
+# Mokulele flights are flown by Southern Airways Express under its FDY
+# callsign, usually followed by the tail number (FDY539SA), not a flight number.
+FDY,9X,Mokulele Airlines
+MKA,,Mokulele
+TPA,,Transair (Cargo)
+EJA,,NetJets
+RCH,,U.S. Air Force
+CNV,,U.S. Navy
+# Stale OpenFlights rows silenced: Island Air closed in 2017, and STT ("Air
+# St. Thomas") is not who flies that prefix around Hawaii today.
+MKU,,
+STT,,

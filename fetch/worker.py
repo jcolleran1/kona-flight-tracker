@@ -1,8 +1,11 @@
-"""Fetch thread: polls the source, enriches records, publishes snapshots.
+"""Fetch thread: polls the sources, merges and enriches, publishes snapshots.
 
-Never raises out of run(); the renderer must keep going no matter what
-happens here. Exponential backoff on failure so a down endpoint is never
-hammered.
+One loop, one thread, the only writer of SharedState. Sources are polled in
+turn on a staggered schedule, each at its own interval and with its own
+backoff, so one dead or slow feed never stops the others. Nothing here waits
+on enrichment (see enrich/worker.py).
+
+Never raises out of run(): the renderer must keep going whatever happens here.
 """
 from __future__ import annotations
 
@@ -12,145 +15,158 @@ import time
 
 from config import Config
 from enrich.lookups import Lookups
-from enrich.geo import haversine_nm, bearing_deg
-from enrich.trend import TrendTracker
-from fetch.sources import make_source, FetchError
-from state import Aircraft, SharedState
+from enrich.tracker import Tracker
+from enrich.worker import make_enricher
+from fetch.merge import merge_polls
+from fetch.sources import FetchError, Poll, make_source
+from state import SharedState, SourceHealth
 
 log = logging.getLogger("fetch")
 
-BACKOFF_BASE = 5.0     # seconds
-BACKOFF_MAX = 300.0    # never wait longer than 5 min between retries
+BACKOFF_BASE = 5.0       # seconds
+BACKOFF_MAX = 60.0       # a home Wi-Fi blip should never cost more than a minute
+REFUSED_BACKOFF = 900.0  # HTTP 401/403: the service doesn't want us right now; leave it alone
+RATE_LIMIT_BACKOFF = 60.0
 
 
-def parse_record(raw: dict, cfg: Config, lookups: Lookups, trends: TrendTracker) -> Aircraft | None:
-    """Convert one v2-format record into an enriched Aircraft, or None to skip."""
-    lat, lon = raw.get("lat"), raw.get("lon")
-    if lat is None or lon is None:
-        return None  # no position, nothing to display
-
-    hex_id = str(raw.get("hex", "")).strip()
-    callsign = str(raw.get("flight", "") or "").strip()
-    registration = str(raw.get("r", "") or "").strip()
-
-    alt = raw.get("alt_baro")
-    on_ground = alt == "ground"
-    altitude_ft = None if (alt is None or on_ground) else float(alt)
-
-    gs = raw.get("gs")
-    ground_speed_kt = float(gs) if gs is not None else None
-
-    track = raw.get("track")
-    track_deg = float(track) if track is not None else None
-
-    dist = haversine_nm(cfg.lat, cfg.lon, lat, lon)
-    brg = bearing_deg(cfg.lat, cfg.lon, lat, lon)
-    trend = trends.update(hex_id, dist)
-
-    type_code = str(raw.get("t", "") or "").strip().upper()
-
-    return Aircraft(
-        hex=hex_id,
-        callsign=callsign,
-        airline=lookups.airline_for_callsign(callsign),
-        type_code=type_code,
-        type_name=lookups.type_name(type_code),
-        altitude_ft=altitude_ft,
-        on_ground=on_ground,
-        ground_speed_kt=ground_speed_kt,
-        track_deg=track_deg,
-        lat=float(lat),
-        lon=float(lon),
-        distance_nm=dist,
-        bearing_deg=brg,
-        trend=trend,
-        registration=registration,
-    )
+def backoff_seconds(error: FetchError, failures: int, interval: float) -> float:
+    """How long to leave a source alone after a failed poll."""
+    if error.retry_after is not None:
+        wait = error.retry_after
+    elif error.status in (401, 403):
+        wait = REFUSED_BACKOFF
+    elif error.status == 429:
+        wait = RATE_LIMIT_BACKOFF
+    else:
+        wait = min(BACKOFF_BASE * 2 ** max(0, failures - 1), BACKOFF_MAX)
+    return max(wait, interval)
 
 
-def fetch_once(source, cfg: Config, lookups: Lookups, trends: TrendTracker,
-               routes=None, aircraftdb=None) -> list[Aircraft]:
-    raw_list = source.fetch().aircraft
-    aircraft = []
-    for raw in raw_list:
+class _SourceState:
+    def __init__(self, source, interval: float, first_due: float):
+        self.source = source
+        self.name = source.name
+        self.interval = max(interval, getattr(source, "min_interval", 0.0))
+        self.next_due = first_due
+        self.failures = 0
+        self.last_ok: float | None = None
+        self.last_poll: Poll | None = None
+        self.last_error = ""
+        self.last_attempt_ok = False
+        self.count = 0
+
+    def health(self, now: float) -> SourceHealth:
+        return SourceHealth(
+            name=self.name, ok=self.last_attempt_ok, aircraft=self.count,
+            age_seconds=None if self.last_ok is None else now - self.last_ok,
+            error=self.last_error)
+
+
+class FetchLoop:
+    """The polling state machine, separate from the thread so tests (and
+    --once, and the preview tool) can drive it one step at a time."""
+
+    def __init__(self, cfg: Config, state: SharedState | None = None, *, sources=None,
+                 enricher=None, lookups: Lookups | None = None, clock=time.monotonic,
+                 confirm_seconds: float = 12.0):
+        self.cfg = cfg
+        self.state = state
+        self.clock = clock
+        srcs = list(sources) if sources is not None else [make_source(n, cfg) for n in cfg.sources]
+        now = clock()
+        stagger = cfg.interval_seconds / max(1, len(srcs))
+        self.sources = [_SourceState(s, cfg.interval_seconds, now + i * stagger)
+                        for i, s in enumerate(srcs)]
+        self.preferred = tuple(s.name for s in srcs if getattr(s, "kind", "") == "local")
+        self.enricher = enricher if enricher is not None else make_enricher(cfg, srcs)
+        self.tracker = Tracker(cfg, lookups or Lookups.load(), self.enricher, confirm_seconds)
+        self.aircraft: list = []
+        self.featured_hex: str | None = None
+
+    def next_due(self) -> float:
+        return min(s.next_due for s in self.sources)
+
+    def poll(self, st: _SourceState) -> bool:
+        """Poll one source and update its state. True on success."""
         try:
-            ac = parse_record(raw, cfg, lookups, trends)
-        except (TypeError, ValueError) as e:
-            log.debug("skipping malformed record: %s", e)
-            continue
-        if ac is not None:
-            aircraft.append(ac)
-    aircraft.sort(key=lambda a: a.distance_nm)
-    trends.prune({a.hex for a in aircraft})
+            poll = st.source.fetch()
+        except FetchError as e:
+            st.failures += 1
+            st.last_attempt_ok = False
+            st.last_error = str(e)[:80]
+            wait = backoff_seconds(e, st.failures, st.interval)
+            st.next_due = self.clock() + wait
+            log.warning("%s: fetch failed (%d in a row): %s -- retrying in %.0fs",
+                        st.name, st.failures, e, wait)
+            return False
+        now = self.clock()
+        if st.failures:
+            log.info("%s: recovered after %d failures", st.name, st.failures)
+        st.failures, st.last_error, st.last_attempt_ok = 0, "", True
+        st.last_ok, st.last_poll = now, poll
+        st.count = sum(1 for r in poll.aircraft if r.get("lat") is not None)
+        st.next_due = now + st.interval
+        return True
 
-    if aircraftdb is not None:
-        from enrich.motion import select_featured
-        featured = select_featured(aircraft)
+    def rebuild(self) -> None:
+        """Merge every source's latest response and run enrichment over it."""
+        now = self.clock()
+        max_age = self.cfg.max_position_age_seconds
+        merged = merge_polls([s.last_poll for s in self.sources], now, max_age, self.preferred)
+        self.aircraft, self.featured_hex = self.tracker.update(merged, now)
 
-        # Fill airline/registration from the hex for any plane still missing an
-        # airline whose hex is ALREADY cached — free, no network call.
-        for ac in aircraft:
-            if ac.airline:
-                continue
-            info = aircraftdb.cached(ac.hex)
-            if info:
-                ac.airline = ac.airline or info.get("airline", "")
-                ac.registration = ac.registration or info.get("registration", "")
+    def publish(self, ok: bool) -> None:
+        if self.state is None:
+            return
+        now = self.clock()
+        stamps = [s.last_ok for s in self.sources if s.last_ok is not None]
+        self.state.publish(
+            self.aircraft, featured_hex=self.featured_hex, ok=ok,
+            fetched_at=max(stamps) if stamps else 0.0,
+            sources=[s.health(now) for s in self.sources],
+            weather=self.enricher.weather())
 
-        # One live lookup per poll, for the featured flight only, so the hero
-        # panel names the operator even before the callsign arrives. Bounded
-        # and cached; the result also benefits the table on later polls.
-        if featured is not None and not featured.airline and featured.hex:
-            info = aircraftdb.lookup(featured.hex)
-            if info:
-                featured.airline = info.get("airline", "")
-                featured.registration = featured.registration or info.get("registration", "")
-
-    # Resolve the city pair for the one featured flight (cheap, cached).
-    if routes is not None:
-        from enrich.motion import select_featured
-        featured = select_featured(aircraft)
-        if featured is not None and featured.callsign:
-            r = routes.lookup(featured.callsign)
-            if r:
-                featured.origin_code = r["origin_code"]
-                featured.origin_name = r["origin_name"]
-                featured.dest_code = r["dest_code"]
-                featured.dest_name = r["dest_name"]
-    return aircraft
+    def tick(self, should_publish=lambda: True) -> float:
+        """Poll whichever source is due (at most one), publish, and return the
+        number of seconds until the next source is due."""
+        now = self.clock()
+        due = [s for s in self.sources if s.next_due <= now]
+        if due:
+            st = min(due, key=lambda s: s.next_due)
+            ok = self.poll(st)
+            self.rebuild()
+            # Healthy overall if this poll worked, or another source has
+            # delivered within its last couple of cycles.
+            recent = any(s.last_ok is not None and self.clock() - s.last_ok
+                         <= 2 * s.interval + self.cfg.timeout_seconds for s in self.sources)
+            if should_publish():
+                self.publish(ok or recent)
+        return max(0.05, self.next_due() - self.clock())
 
 
 def run(state: SharedState, cfg: Config, stop: threading.Event) -> None:
-    lookups = Lookups.load()
-    trends = TrendTracker()
-    from enrich.routes import RouteLookup
-    routes = RouteLookup(timeout=min(cfg.timeout_seconds, 5.0))
-    from enrich.aircraftdb import AircraftLookup
-    aircraftdb = AircraftLookup(timeout=min(cfg.timeout_seconds, 5.0))
-    source = make_source(cfg.source, cfg)
-    log.info("fetch thread up: %s every %ss", cfg.source, cfg.interval_seconds)
-
+    """Thread entry point. `stop` is this thread's own token: once it is set
+    the thread publishes nothing more, even if it was stuck in a socket call
+    when the watchdog replaced it."""
+    loop: FetchLoop | None = None
     failures = 0
     while not stop.is_set():
         try:
-            aircraft = fetch_once(source, cfg, lookups, trends, routes, aircraftdb)
-            state.publish_success(aircraft)
-            if failures:
-                log.info("recovered after %d failures", failures)
+            if loop is None:
+                loop = FetchLoop(cfg, state)
+                loop.enricher.start()
+                log.info("fetch thread up: %s every %gs", ", ".join(cfg.sources),
+                         cfg.interval_seconds)
+            wait = loop.tick(should_publish=lambda: not stop.is_set())
             failures = 0
-            wait = cfg.interval_seconds
-        except FetchError as e:
-            failures += 1
-            state.publish_failure()
-            wait = min(BACKOFF_BASE * (2 ** (failures - 1)), BACKOFF_MAX)
-            log.warning("fetch failed (%d in a row): %s -- retrying in %.0fs", failures, e, wait)
         except Exception:
             # Truly unexpected; log it, back off, keep the thread alive.
             failures += 1
-            state.publish_failure()
-            wait = min(BACKOFF_BASE * (2 ** (failures - 1)), BACKOFF_MAX)
+            wait = min(BACKOFF_BASE * 2 ** (failures - 1), BACKOFF_MAX)
             log.exception("unexpected error in fetch loop -- retrying in %.0fs", wait)
-
+            if not stop.is_set():
+                state.publish((), ok=False, fetched_at=state.read().fetched_at)
         stop.wait(wait)
-
+    if loop is not None:
+        loop.enricher.stop()
     log.info("fetch thread stopping")

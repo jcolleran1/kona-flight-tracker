@@ -13,7 +13,6 @@ Never blocks on the network. Reads immutable snapshots from SharedState.
 """
 from __future__ import annotations
 
-import datetime as dt
 import logging
 import os
 import time
@@ -22,33 +21,38 @@ import pygame
 
 from config import Config
 from enrich.geo import compass_point
-from enrich.motion import movement_class, select_featured
+from enrich.motion import movement_color_key
 from render.theme import (
     Theme, make_gradient, BG, AMBER, AMBER_DIM, AMBER_FAINT, WHITE_WARM,
     GREEN, STALE, RED_DIM, TEAL, CORAL, SAND,
 )
+from render.timeutil import clock_is_set, fmt_clock, in_quiet_hours, local_now
 from render.units import fmt_distance, fmt_altitude, fmt_speed
 from render.mapview import MapView
 from state import Aircraft, SharedState, Snapshot
 
 log = logging.getLogger("render")
 
-PULSE_SECONDS = 1.2  # row brightness pulse duration after data change
+PULSE_SECONDS = 1.2  # row brightness pulse duration after a row first appears
+
+PHASE_WORDS = {
+    "ground": "ON THE GROUND",
+    "arriving": "ARRIVING",
+    "departing": "DEPARTING",
+    "overflight": "OVERFLIGHT",
+    "local": "IN THE AREA",
+}
+ACCENTS = {"ground": SAND, "toward": TEAL, "away": CORAL}
 
 
-def _parse_hhmm(s: str) -> dt.time:
-    h, m = s.split(":")
-    return dt.time(int(h), int(m))
+def accent_for(ac: Aircraft) -> tuple[int, int, int]:
+    return ACCENTS[movement_color_key(ac.phase, ac.direction)]
 
 
-def in_quiet_hours(cfg: Config, now: dt.datetime | None = None) -> bool:
-    if not cfg.quiet_enabled:
-        return False
-    now_t = (now or dt.datetime.now()).time()
-    start, end = _parse_hhmm(cfg.quiet_start), _parse_hhmm(cfg.quiet_end)
-    if start <= end:
-        return start <= now_t < end
-    return now_t >= start or now_t < end  # crosses midnight
+def live_aircraft(snap: Snapshot, now: float, max_age: float) -> list[Aircraft]:
+    """Aircraft whose position is still fresh. Applied at draw time, so a dead
+    network connection can never leave ghosts frozen on the wall."""
+    return [a for a in snap.aircraft if now - a.pos_mono <= max_age]
 
 
 class Renderer:
@@ -57,6 +61,8 @@ class Renderer:
         self.state = state
         self.on_watchdog = on_watchdog  # called when fetch looks dead
         self._last_watchdog_fire = 0.0
+        self._started = time.monotonic()
+        self._last_frame_error = 0.0
         self._row_seen: dict[str, tuple[str, float]] = {}  # hex -> (row text, change time)
         self.screen: pygame.Surface | None = None
         self.theme: Theme | None = None
@@ -113,10 +119,10 @@ class Renderer:
 
     # ---------- left panel ----------
 
-    def draw_left(self, snap: Snapshot, featured: Aircraft | None) -> None:
+    def draw_left(self, aircraft: list[Aircraft], featured: Aircraft | None) -> None:
         if featured is not None:
             self._draw_hero(featured)
-            rest = [a for a in snap.aircraft if a.hex != featured.hex]
+            rest = [a for a in aircraft if a.hex != featured.hex]
             self._draw_rows(rest)
         else:
             self._draw_quiet_left()
@@ -124,9 +130,10 @@ class Renderer:
     def _draw_quiet_left(self) -> None:
         t, s = self.theme, self.screen
         u, pw = t.u, self.panel_w
-        now = dt.datetime.now()
         t.blit_text(s, "QUIET SKIES", t.hero_mid, AMBER_DIM, (pw // 2, int(360 * u)), "center")
-        t.blit_text(s, now.strftime("%H:%M"), t.clock_big, AMBER, (pw // 2, int(440 * u)), "center")
+        if clock_is_set():
+            t.blit_text(s, fmt_clock(local_now(self.cfg), self.cfg.clock_24h), t.clock_big,
+                        AMBER, (pw // 2, int(440 * u)), "center")
         t.blit_text(s, "NO AIRCRAFT IN RANGE", t.status, AMBER_FAINT,
                     (pw // 2, int(600 * u)), "center")
 
@@ -135,8 +142,8 @@ class Renderer:
         u = t.u
         pad = int(46 * u)
 
-        callsign = ac.callsign or ac.registration or ac.hex.upper()
-        t.blit_text(s, callsign[:12], t.hero_callsign, WHITE_WARM, (pad, int(18 * u)))
+        t.blit_text(s, (ac.label or "UNKNOWN")[:12], t.hero_callsign, WHITE_WARM,
+                    (pad, int(18 * u)))
 
         ident = " / ".join(x for x in (ac.airline, ac.type_name or ac.type_code) if x)
         if ident:
@@ -144,21 +151,17 @@ class Renderer:
 
         stat_y = int(212 * u)
         t.blit_text(s, "ALTITUDE", t.hero_label, AMBER_DIM, (pad, stat_y))
-        t.blit_text(s, fmt_altitude(ac.altitude_ft, ac.on_ground, self.cfg.units),
-                    t.hero_big, AMBER, (pad, stat_y + int(30 * u)))
+        t.blit_text(s, self._altitude_text(ac), t.hero_big, AMBER, (pad, stat_y + int(30 * u)))
         spd_x = pad + int(420 * u)
         t.blit_text(s, "GROUND SPEED", t.hero_label, AMBER_DIM, (spd_x, stat_y))
-        t.blit_text(s, fmt_speed(ac.ground_speed_kt, self.cfg.units),
+        t.blit_text(s, fmt_speed(ac.ground_speed_kt, self.cfg.speed_units),
                     t.hero_big, AMBER, (spd_x, stat_y + int(30 * u)))
 
         dist_y = int(322 * u)
-        cls = movement_class(ac)
-        word = {"ground": "ON THE GROUND", "approaching": "TOWARD KONA",
-                "departing": "LEAVING KONA"}[cls]
-        accent = {"ground": SAND, "approaching": TEAL, "departing": CORAL}[cls]
-        dist_txt = f"{fmt_distance(ac.distance_nm, self.cfg.units)} {compass_point(ac.bearing_deg)}"
+        dist_txt = (f"{fmt_distance(ac.distance_nm, self.cfg.distance_units)} "
+                    f"{compass_point(ac.bearing_deg)} FROM {self.cfg.airport_iata}")
         r = t.blit_text(s, dist_txt + "   ·   ", t.hero_small, AMBER, (pad, dist_y))
-        t.blit_text(s, word, t.hero_small, accent, (r.right, dist_y))
+        t.blit_text(s, PHASE_WORDS[ac.phase], t.hero_small, accent_for(ac), (r.right, dist_y))
 
         rule_y = int(386 * u)
         pygame.draw.line(s, AMBER_FAINT, (pad, rule_y),
@@ -186,20 +189,13 @@ class Renderer:
         max_rows = min(self.cfg.max_rows, (h - status_h - top) // row_h)
         now = time.monotonic()
         for ac in aircraft[:max_rows]:
-            row_text = self._row_string(ac)
-            seen = self._row_seen.get(ac.hex)
-            if seen is None or seen[0] != row_text:
-                self._row_seen[ac.hex] = (row_text, now)
-                changed_at = now
-            else:
-                changed_at = seen[1]
-            color = WHITE_WARM if (now - changed_at) < PULSE_SECONDS else AMBER
+            # pulse a row once, when the aircraft first shows up in the table
+            seen = self._row_seen.setdefault(ac.hex, ("", now))
+            color = WHITE_WARM if (now - seen[1]) < PULSE_SECONDS else AMBER
 
-            cs = ac.callsign or ac.registration or ac.hex.upper()
-            t.blit_text(s, cs[:8], t.row_bold, color, (x_flight, top))
+            t.blit_text(s, (ac.label or "—")[:8], t.row_bold, color, (x_flight, top))
             t.blit_text(s, (ac.airline or "—")[:18].upper(), t.row, color, (x_airline, top))
-            t.blit_text(s, fmt_altitude(ac.altitude_ft, ac.on_ground, self.cfg.units),
-                        t.row, color, (x_alt, top), "right")
+            t.blit_text(s, self._altitude_text(ac), t.row, color, (x_alt, top), "right")
 
             ry = top + row_h - int(14 * u)
             pygame.draw.line(s, AMBER_FAINT, (pad, ry), (pw - pad, ry), 1)
@@ -212,25 +208,28 @@ class Renderer:
 
     # ---------- status strip (left panel) ----------
 
-    def _draw_status(self, snap: Snapshot, reconnecting: bool) -> None:
+    def _draw_status(self, snap: Snapshot, reconnecting: bool, count: int,
+                     mono: float) -> None:
         t, s = self.theme, self.screen
         h = s.get_height()
         u, pw = t.u, self.panel_w
         pad = int(46 * u)
         y = h - int(46 * u)
 
-        t.blit_text(s, dt.datetime.now().strftime("%a %b %d   %H:%M:%S"),
-                    t.status, AMBER_DIM, (pad, y))
+        if clock_is_set():
+            now = local_now(self.cfg)
+            t.blit_text(s, now.strftime("%a %b %d   ") + fmt_clock(now, self.cfg.clock_24h, True),
+                        t.status, AMBER_DIM, (pad, y))
 
         if snap.fetched_at:
-            age = int(time.monotonic() - snap.fetched_at)
-            mid = f"{len(snap.aircraft)} AIRCRAFT · {age}s"
+            age = max(0, int(mono - snap.fetched_at))
+            mid = f"{count} AIRCRAFT · {age}s"
         else:
             mid = "WAITING . . ."
         if reconnecting:
             mid = "RECONNECTING · " + mid
 
-        stale = snap.fetched_at and (time.monotonic() - snap.fetched_at) > self.cfg.stale_after_seconds
+        stale = snap.fetched_at and (mono - snap.fetched_at) > self.cfg.stale_after_seconds
         dot_color = GREEN if (snap.ok and not stale) else STALE
         if reconnecting:
             dot_color = RED_DIM
@@ -261,22 +260,26 @@ class Renderer:
                         (x0 + pad, int(82 * u)))
             return
 
-        cls = movement_class(featured)
-        callsign = featured.callsign or featured.registration or featured.hex.upper()
+        phase = featured.phase
+        callsign = featured.label or "UNKNOWN"
+        accent, word = accent_for(featured), PHASE_WORDS[phase]
+        name = self.cfg.airport_name.upper()
+        origin = self._route_place(featured, end="origin")
+        dest = self._route_place(featured, end="dest")
 
-        if cls == "departing":
-            accent, word = CORAL, "DEPARTING"
-            place = self._route_place(featured, end="dest")
-            tail = f"TO {place}" if place else "LEAVING KONA"
+        if phase == "departing":
+            tail = f"TO {dest}" if dest else f"LEAVING {name}"
             self._banner_triangle(x0 + pad, int(40 * u), accent, up=True)
-        elif cls == "approaching":
-            accent, word = TEAL, "ARRIVING"
-            place = self._route_place(featured, end="origin")
-            tail = f"FROM {place}" if place else "INBOUND TO KONA"
+        elif phase == "arriving":
+            tail = f"FROM {origin}" if origin else f"INBOUND TO {name}"
             self._banner_triangle(x0 + pad, int(40 * u), accent, up=False)
-        else:  # ground
-            accent, word = SAND, "ON THE GROUND"
-            tail = "AT KONA INTERNATIONAL"
+        elif phase == "ground":
+            tail = f"AT {name} INTERNATIONAL" if featured.distance_nm <= 3 else ""
+        else:  # overflight / local: a route if we trust one, else just the heading
+            if origin and dest:
+                tail = f"{origin} TO {dest}"
+            else:
+                tail = "HEADING " + ("TOWARD " if featured.direction == "toward" else "AWAY FROM ") + name
 
         tx = x0 + pad + int(40 * u)
         line1 = t.blit_text(s, word, t.hero_small, accent, (tx, int(20 * u)))
@@ -302,14 +305,19 @@ class Renderer:
 
     # ---------- compose a full frame ----------
 
-    def draw_frame(self, snap: Snapshot, reconnecting: bool) -> None:
+    def draw_frame(self, snap: Snapshot, reconnecting: bool, now: float | None = None) -> None:
         s = self.screen
+        now = time.monotonic() if now is None else now
         s.blit(self._bg, (0, 0))
-        featured = select_featured(snap.aircraft)
-        self.draw_left(snap, featured)
-        self._draw_status(snap, reconnecting)
+        aircraft = live_aircraft(snap, now, self.cfg.max_position_age_seconds)
+        featured = next((a for a in aircraft if a.hex == snap.featured_hex), None)
+        if featured is None and aircraft:
+            # the featured flight just aged out; fall back to the nearest live one
+            featured = min(aircraft, key=lambda a: (a.on_ground, a.distance_nm))
+        self.draw_left(aircraft, featured)
+        self._draw_status(snap, reconnecting, len(aircraft), now)
         if self.mapview is not None:
-            self.mapview.draw(s, snap.aircraft, featured.hex if featured else None)
+            self.mapview.draw(s, aircraft, featured.hex if featured else None, now)
             pygame.draw.line(s, AMBER_FAINT, (self.panel_w, 0),
                              (self.panel_w, s.get_height()), max(1, int(2 * self.theme.u)))
             self._draw_route_banner(featured)
@@ -331,23 +339,28 @@ class Renderer:
             now = time.monotonic()
             age = (now - snap.fetched_at) if snap.fetched_at else None
             stale = age is not None and age > self.cfg.stale_after_seconds
-            dead = (age is None and now > self.cfg.watchdog_seconds) or \
-                   (age is not None and age > self.cfg.watchdog_seconds)
+            dead = (age if age is not None else now - self._started) > self.cfg.watchdog_seconds
 
             if dead and self.on_watchdog and (now - self._last_watchdog_fire) > 60:
                 self._last_watchdog_fire = now
-                log.error("watchdog: no fresh data for %ss -- requesting fetch restart",
-                          int(age or now))
+                log.error("watchdog: no fresh data for %ds -- requesting fetch restart",
+                          int(age if age is not None else now - self._started))
                 self.on_watchdog()
 
-            if not snap.fetched_at:
-                self.draw_splash()
-            else:
-                self.draw_frame(snap, dead)
+            try:
+                if not snap.fetched_at:
+                    self.draw_splash()
+                else:
+                    self.draw_frame(snap, dead, now)
+            except Exception:
+                # A bad frame must never take the wall down. Log it (at most
+                # once a minute) and try again next frame.
+                if now - self._last_frame_error > 60 or not self._last_frame_error:
+                    self._last_frame_error = now
+                    log.exception("error drawing frame; continuing")
+                self.screen.blit(self._bg, (0, 0))
 
             dim = 0.0
-            if stale and snap.aircraft:
-                dim = max(dim, 0.25)
             if in_quiet_hours(self.cfg):
                 dim = max(dim, 1.0 - self.cfg.quiet_brightness)
             if dim > 0:
@@ -357,5 +370,6 @@ class Renderer:
             pygame.display.flip()
             clock.tick(self.cfg.fps)
 
-    def _row_string(self, ac: Aircraft) -> str:
-        return f"{ac.callsign}|{ac.altitude_ft}|{ac.ground_speed_kt}|{ac.distance_nm:.1f}"
+    def _altitude_text(self, ac: Aircraft) -> str:
+        return fmt_altitude(ac.altitude_ft, ac.on_ground, self.cfg.altitude_units,
+                            phase=ac.phase, vertical_rate_fpm=ac.vertical_rate_fpm)

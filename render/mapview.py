@@ -1,9 +1,10 @@
 """Right-panel geographic map: the calibrated Big Island view with live aircraft.
 
 Projects real ADS-B lat/lon onto a static map image using the bounds from
-config (your original calibration), rotates each icon by its true track,
-color-codes by altitude, and overlays range rings + a home marker so the
-panel reads like a standard flight-tracker map.
+config, rotates each icon by its true track, colours it by movement (sand =
+ground, teal = toward Kona, coral = leaving Kona) and overlays range rings and
+a home marker. Between position updates each aircraft is moved along its track
+(enrich/deadreckon.py) so it glides instead of sitting still and jumping.
 
 Everything expensive is done once or cached:
   * the map image is loaded and scaled a single time
@@ -14,12 +15,13 @@ which is what makes it viable on a low-power Pi.
 from __future__ import annotations
 
 import logging
-import math
 
 import pygame
 
 from config import Config, resolve_asset
-from enrich.motion import movement_class
+from enrich.deadreckon import Smoother
+from enrich.motion import movement_color_key
+from render.projection import Projection
 from state import Aircraft
 
 log = logging.getLogger("map")
@@ -34,12 +36,21 @@ HOME_COLOR = (120, 224, 214)
 LABEL_COLOR = (208, 224, 216)
 
 
+OVERFLIGHT_DIM = 0.62       # overflights: same colour, dimmer...
+OVERFLIGHT_SCALE = 0.74     # ...and smaller
+
+
 def plane_color(ac: Aircraft) -> tuple[int, int, int]:
-    return {
+    """One of the three movement colours; overflights get a dimmed shade of
+    the colour for their direction, never a fourth colour."""
+    base = {
         "ground": COLOR_GROUND,
-        "approaching": COLOR_APPROACH,
-        "departing": COLOR_DEPART,
-    }[movement_class(ac)]
+        "toward": COLOR_APPROACH,
+        "away": COLOR_DEPART,
+    }[movement_color_key(ac.phase, ac.direction)]
+    if ac.phase == "overflight":
+        return tuple(int(c * OVERFLIGHT_DIM) for c in base)
+    return base
 
 
 def _build_vector_plane(size: int) -> pygame.Surface:
@@ -76,15 +87,18 @@ class MapView:
         self.map_h = screen_h
         self.x0 = screen_w - self.map_w  # left edge of the map panel
 
-        self.lat_min, self.lat_max = cfg.map_lat_min, cfg.map_lat_max
-        self.lon_min, self.lon_max = cfg.map_lon_min, cfg.map_lon_max
-        self.lat_range = self.lat_max - self.lat_min
-        self.lon_range = self.lon_max - self.lon_min
+        self.proj = Projection(cfg.map_lat_min, cfg.map_lat_max, cfg.map_lon_min,
+                               cfg.map_lon_max, self.x0, 0, self.map_w, self.map_h)
 
         self.bg = self._load_map()
         self.base_icon = self._load_icon(cfg)
-        # cache: (color, angle_bucket_deg) -> rotated, tinted surface
+        small = max(8, int(cfg.plane_size * OVERFLIGHT_SCALE))
+        self.small_icon = pygame.transform.smoothscale(self.base_icon, (small, small))
+        # cache: (color, angle_bucket_deg, small) -> rotated, tinted surface
         self._icon_cache: dict[tuple, pygame.Surface] = {}
+        self.panel_rect = pygame.Rect(self.x0, 0, self.map_w, self.map_h)
+        self.smoother = Smoother(cfg.tween_seconds, cfg.max_position_age_seconds,
+                                 enabled=cfg.dead_reckoning)
 
     # ---------- asset loading (once) ----------
 
@@ -112,19 +126,16 @@ class MapView:
 
     def project(self, lat: float, lon: float) -> tuple[int, int] | None:
         """lat/lon -> (px, py) on screen, or None if outside the map frame."""
-        rel_x = (lon - self.lon_min) / self.lon_range
-        rel_y = 1.0 - (lat - self.lat_min) / self.lat_range
-        if not (-0.02 <= rel_x <= 1.02 and -0.02 <= rel_y <= 1.02):
-            return None
-        return self.x0 + int(rel_x * self.map_w), int(rel_y * self.map_h)
+        return self.proj.project(lat, lon)
 
-    def _tinted_rotated(self, color, track_deg: float | None) -> pygame.Surface:
+    def _tinted_rotated(self, color, track_deg: float | None,
+                        small: bool = False) -> pygame.Surface:
         angle = 0.0 if track_deg is None else track_deg
         bucket = round(angle / 5.0) * 5 % 360
-        key = (color, bucket)
+        key = (color, bucket, small)
         surf = self._icon_cache.get(key)
         if surf is None:
-            tinted = self.base_icon.copy()
+            tinted = (self.small_icon if small else self.base_icon).copy()
             tinted.fill(color + (255,), special_flags=pygame.BLEND_RGBA_MULT)
             # pygame rotates counter-clockwise; track is clockwise-from-north.
             surf = pygame.transform.rotate(tinted, -bucket)
@@ -135,8 +146,18 @@ class MapView:
 
     # ---------- drawing ----------
 
-    def draw(self, screen: pygame.Surface, aircraft: list[Aircraft],
-             hero_hex: str | None) -> None:
+    def draw(self, screen: pygame.Surface, aircraft, hero_hex: str | None,
+             now: float) -> None:
+        # Everything below is clipped to the map panel: range rings and labels
+        # near the edge must never spill onto the info panel.
+        previous_clip = screen.get_clip()
+        screen.set_clip(self.panel_rect)
+        try:
+            self._draw(screen, aircraft, hero_hex, now)
+        finally:
+            screen.set_clip(previous_clip)
+
+    def _draw(self, screen, aircraft, hero_hex, now) -> None:
         screen.blit(self.bg, (self.x0, 0))
 
         home = self.project(self.cfg.lat, self.cfg.lon)
@@ -149,14 +170,15 @@ class MapView:
         # Pass 1: icons. Draw farthest first so the nearest (hero) ends on top.
         # Cache projected positions so the label pass doesn't reproject.
         projected: dict[str, tuple[int, int]] = {}
-        for ac in sorted(aircraft, key=lambda a: -a.distance_nm):
-            pos = self.project(ac.lat, ac.lon)
+        for ac in sorted(aircraft, key=lambda a: (a.phase != "overflight", -a.distance_nm)):
+            pos = self.project(*self.smoother.position(ac, now))
             if pos is None:
                 continue
             projected[ac.hex] = pos
             is_hero = ac.hex == hero_hex
             color = plane_color(ac)
-            icon = self._tinted_rotated(color, ac.track_deg)
+            icon = self._tinted_rotated(color, ac.track_deg,
+                                        small=ac.phase == "overflight" and not is_hero)
             rect = icon.get_rect(center=pos)
             if is_hero:
                 pygame.draw.circle(screen, FEATURED_RING, pos,
@@ -169,6 +191,7 @@ class MapView:
         # clear spot (its icon still shows).
         if self.cfg.show_labels:
             self._draw_labels(screen, aircraft, hero_hex, projected)
+        self.smoother.prune({a.hex for a in aircraft})
 
     def _draw_labels(self, screen, aircraft, hero_hex, projected) -> None:
         t = self.theme
@@ -181,11 +204,13 @@ class MapView:
             if pos is None:
                 continue
             is_hero = ac.hex == hero_hex
-            label = ac.callsign or ac.registration or ac.hex.upper()
+            label = ac.label
             if not label:
-                continue
+                continue          # no identity known: icon only, never a guess
             font = t.map_label_bold if is_hero else t.map_label
             col = FEATURED_RING if is_hero else LABEL_COLOR
+            if ac.phase == "overflight" and not is_hero:
+                col = tuple(int(c * 0.7) for c in LABEL_COLOR)
             surf = t.text(label, font, col)
             w, h = surf.get_size()
             px, py = pos
@@ -221,9 +246,8 @@ class MapView:
     def _draw_rings(self, screen, home) -> None:
         hx, hy = home
         # nautical miles -> pixels (lat and lon scales differ; use an ellipse)
-        px_per_nm_y = self.map_h / (self.lat_range * 60.0)
-        px_per_nm_x = self.map_w / (self.lon_range * 60.0 *
-                                    math.cos(math.radians(self.cfg.lat)))
+        px_per_nm_y = self.proj.px_per_nm_y
+        px_per_nm_x = self.proj.px_per_nm_x
         n = 1
         while True:
             r_nm = self.cfg.range_ring_nm * n

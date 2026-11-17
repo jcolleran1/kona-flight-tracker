@@ -43,6 +43,46 @@ Ask these up front; don't guess.
 
 ---
 
+## Status
+
+| Phase | State | Notes |
+|---|---|---|
+| 0 Safety net | done | `python3 -m pytest -q`; scripted Kona scenario replaces the Seattle sample |
+| 1 Data correctness | done | see below |
+| 2 Coverage | not started | |
+| 3 UI polish | not started | previews go to Josh before anything is final |
+| 4 Appliance hardening | not started | |
+| 5 Optional extras | not started | |
+
+**Phase 1 as built** (anything that differs from the plan text below):
+
+- METAR altimeter arrives in hPa from aviationweather.gov; the correction uses
+  the standard-atmosphere formula (about 27 ft per hPa), not the inHg rule of
+  thumb. Same result, no unit conversion to get wrong.
+- Phases are `ground / arriving / departing / overflight / local`. "Local" is
+  low traffic that isn't using Kona (tour helicopters, Hilo and Waimea
+  traffic); it is drawn at full size in its direction colour and reads
+  "IN THE AREA". Only overflights are dimmed.
+- An arrival must be descending, on a course that passes within reach of the
+  field, and low enough for its distance to land. A departure is anything seen
+  on the ground at Kona that lifts off, or climbing outbound on a radial.
+  Both need 12 s of agreement before they are believed and then hold through
+  level-offs and turns.
+- Routes are validated geometrically (aircraft near the great-circle corridor,
+  not flying away from the destination, consistent with what it is doing at
+  Kona). A rejected route is blanked.
+- Airline names: brand rules (`data/brand_rules.csv`), then the hand-checked
+  `data/overrides.csv`, then adsbdb's airline record, then OpenFlights rows
+  marked active. OpenFlights is the weakest link; add an override row for
+  anything it gets wrong.
+- Anonymous TIS-B targets (`~` hex) and ADS-B category C (vehicles, obstacles)
+  are dropped. `show_anonymous = true` brings the first group back.
+- Aircraft beyond `radius_nm` are dropped even if a source reports them.
+- Enrichment requests go to adsbdb only for plain airline+number callsigns
+  (routes) and for airframes whose feed record lacks a tail number or type.
+
+---
+
 ## Audit: what's wrong today, and why
 
 ### A. Negative altitudes

@@ -1,0 +1,28 @@
+callsign_prefix,registration_pattern,owner_contains,airline
+# Brand rules: name the airline by WHO OWNS THE AIRFRAME when the callsign
+# alone gives the wrong answer or no answer.
+#
+#   callsign_prefix       ICAO prefix this rule applies to. Blank = aircraft
+#                         whose callsign names no airline (tail-number
+#                         callsigns, helicopters, bizjets).
+#   registration_pattern  regular expression matched against the tail number
+#   owner_contains        text that must appear in the registered owner
+#   airline               what the wall prints
+#
+# A row matches when the prefix matches AND the registration pattern or the
+# owner text matches. First match wins.
+#
+# Hawaiian Airlines aircraft fly under Alaska's ASA callsign and AS flight
+# numbers since the two airlines combined operations, but they are still
+# Hawaiian's aircraft in Hawaiian's livery: tails N###HA (717, A321neo, A330,
+# 787). The flight number stays in the AS form.
+ASA,^N\d{3}HA$,HAWAIIAN AIRLINES,Hawaiian Airlines
+,,BLUE HAWAIIAN,Blue Hawaiian Helicopters
+,,PARADISE HELICOPTERS,Paradise Helicopters
+,,SAFARI AVIATION,Safari Helicopters
+,,SUNSHINE HELICOPTERS,Sunshine Helicopters
+,,MAUNA LOA HELICOPTER,Mauna Loa Helicopters
+,,SOUTHERN AIRWAYS EXPRESS,Mokulele Airlines
+,,NETJETS,NetJets
+,,KAMAKA AIR,Kamaka Air
+,,ALOHA AIR CARGO,Aloha Air Cargo
