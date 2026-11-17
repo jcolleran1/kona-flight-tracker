@@ -30,6 +30,17 @@ Ask these up front; don't guess.
    ideally a powered hub) for the house? Phase 2.2 code gets written either way;
    hardware decides whether it's turned on.
 
+### Answers (Josh, 2026-11-16)
+
+1. **Home point:** keep KOA; label distances "FROM KOA". A git-ignored
+   `config.local.toml` overlay exists for anyone who wants a private home point.
+2. **Units:** speed in **knots**, distance in **statute miles**, altitude in feet.
+3. **Hawaiian-on-Alaska:** flight number in the Alaska form (`AS1111`), airline
+   shown as **Hawaiian Airlines** when the airframe is Hawaiian's. Rule lives in
+   `data/brand_rules.csv`.
+4. **Local receiver:** undecided. The readsb source is written and tested but
+   ships disabled.
+
 ---
 
 ## Audit: what's wrong today, and why
@@ -107,6 +118,160 @@ Ask these up front; don't guess.
 - **Security:** the old AirLabs key lives in the force-pushed commit `d2abfc2`,
   which GitHub may still serve by SHA. Make sure that key has been rotated at
   AirLabs. Never add API keys to this repo.
+
+---
+
+## Fable's additions
+
+A second audit of the whole repo, ranked by impact. Items marked **(ask)** change
+how the display looks or bend a product rule, so they wait for Josh's OK; the
+rest are folded into the phase shown in brackets.
+
+### Tier 1: can put wrong data on the wall, or take the wall down
+
+1. **Ghost aircraft on any outage.** `SharedState.publish_failure()` keeps the
+   last good aircraft list forever and the renderer keeps drawing it, with only a
+   25% dim after 90 s. With backoff up to 300 s, a Wi-Fi blip freezes planes on
+   the map for minutes. That breaks the "no ghosts" rule. Fix: every aircraft
+   carries the monotonic time of its last position; the renderer drops anything
+   older than the freshness limit no matter what the fetch thread is doing. [P1]
+2. **adsbdb routes are wrong for exactly the flights this wall shows most.**
+   Checked live on 2026-11-16: `ASA1082` was Hawaiian 717 `N484HA` flying
+   interisland, and adsbdb answered **Seattle to San Francisco**. The plan's
+   check ("neither end is KOA while clearly landing") doesn't catch that for a
+   plane in cruise. Add a geometric test that needs no extra data: the aircraft
+   must sit near the great-circle corridor between the two airports, and must
+   not be flying away from its "destination". Fail either one and the route is
+   blanked. [P1]
+3. **One uncaught exception kills the display.** Nothing wraps the per-frame
+   draw, and the labwc autostart has no restart. A single bad record that slips
+   past parsing leaves a dead black screen until someone power-cycles it. Fix:
+   guard the frame, log once, keep going; systemd restart as the backstop. [P1/P4]
+4. **Watchdog can make things worse.** `FetchSupervisor.restart()` runs on the
+   render thread and blocks it for up to 5 s (frozen screen). If the old thread
+   is stuck in a socket call it is abandoned but can still publish later, so two
+   fetch threads can end up writing. Also `dead` uses `time.monotonic()` (system
+   uptime) as "time since start", so it misfires on a Pi that has been up for
+   more than 5 minutes when the app starts. Fix: non-blocking restart, a
+   per-thread stop token checked before every publish, app-relative clock. [P1]
+5. **Stale airline table shows the wrong airline.** `airlines.csv` is the
+   unmaintained OpenFlights dump including defunct carriers. Live example near
+   Kona: callsign `STT303` (a Cessna SkyCourier) maps to "Air St. Thomas", an
+   airline that stopped flying years ago, and `MKU` maps to "Island Air", gone
+   since 2017. Fix: keep only rows OpenFlights marks active, grow the
+   hand-checked override list for carriers that actually fly in Hawaii, and
+   prefer adsbdb's airline record when a lookup returns one. [P1]
+6. **Callsign is not always a flight number.** `FDY539SA` (Mokulele, flown by
+   Southern Airways Express) uses the tail number as its callsign. Blindly
+   swapping the prefix would print a flight number that doesn't exist. Only
+   translate when the suffix is purely numeric; otherwise show the callsign. [P1]
+7. **airplanes.live refuses some networks outright.** From a cloud address it
+   returns HTTP 403 with a "contact us" body. The Pi's home connection is fine
+   today, but it means a single-source wall has a single point of failure the
+   owner can't fix. Phase 2's merge is the fix; the app must also treat 403 as
+   "back off for a long time", never as a reason to retry fast. [P2]
+8. **adsb.fi's `/v2/lat/.../lon/.../dist/...` endpoint is deprecated.** Their
+   README now points to `/v3/`. The existing `AdsbFiSource` uses the old path.
+   Their terms also require citing adsb.fi; add data credits to the README and
+   a small credit line on the display. [P2]
+
+### Tier 2: visibly wrong or rough on screen
+
+9. **Range rings bleed across the left panel.** The ellipses are drawn straight
+   onto the screen with no clip, so rings centred on KOA sweep through the hero
+   text and the table (visible in the committed `preview.png`). Fix: clip all
+   map drawing to the map panel. [P3]
+10. **Rows reshuffle and flash constantly.** The table is sorted by distance
+    every poll, so rows swap places as planes move, and the "changed" pulse
+    keys off distance and altitude, which change every poll, so every row is
+    permanently pulsing. Fix: stable ordering (arrivals, departures, then the
+    rest, each by time first seen) and pulse only when a row is new. [P3]
+11. **Featured flight flaps.** Two planes at similar distance trade the hero
+    panel back and forth every poll. Add stickiness: the featured flight stays
+    until it leaves, lands, or something clearly more relevant shows up. [P1]
+12. **Map is cropped around the wrong thing.** KOA sits 17 nm from the west
+    edge, but arrivals from Honolulu and the mainland come in over the ocean
+    from the north and west, so they are in the table long before they appear
+    on the map. New bounds should put KOA nearer the centre-left with open
+    ocean to the west and north. **(ask: preview both crops)** [P3]
+13. **Clock depends on the Pi's timezone and on NTP.** The Zero has no
+    battery clock. Until NTP syncs after boot the wall shows a wrong time and
+    quiet hours misfire. Fix: timezone comes from config (`Pacific/Honolulu`,
+    which has no daylight saving), and the clock stays blank until the system
+    clock is plausibly set. [P1/P4]
+14. **Text the font can't draw.** Airline and city names from adsbdb go
+    straight to the screen. B612 Mono has no CJK or many accented glyphs, so
+    "Tōkyō" style names render as boxes. Sanitise to what the font covers. [P1]
+15. **Non-aircraft show up as planes.** Ground vehicles and fixed obstacles
+    (ADS-B category `C1`-`C3`), and anonymous `~` hex TIS-B targets with no
+    identity, are listed as aircraft. Filter the first group; never spend an
+    adsbdb lookup on the second. [P1]
+
+### Tier 3: performance and wear on the Zero 2 W
+
+16. **Every frame repaints all 2 million pixels**, six times a second, even
+    when nothing moved: gradient blit, map blit, all text, full-screen flip,
+    plus a full-screen alpha blend whenever quiet hours or the stale dim is on
+    (which is 9 hours a night). Fix: draw the left panel to a cached surface
+    and only rebuild it when its content changes; skip the frame entirely when
+    no aircraft moved a whole pixel and no text changed; bake the dim into the
+    cached layers instead of blending per frame; drop to ~1 fps overnight. [P3]
+17. **Per-frame allocations.** The banner band and every label pill create a
+    new `SRCALPHA` surface each frame. Cache them. [P3]
+18. **Text cache thrash.** The seconds clock and the "Ns" age counter create a
+    new cached surface every second and the cache is wiped wholesale at 600
+    entries. Use a small LRU and keep once-a-second strings out of it. [P3]
+19. **Blocking enrichment and unbounded caches** are already in the plan
+    (B, H). Extra detail found: transient failures are cached for 24 h in
+    `aircraftdb.py`, so one timeout hides an airline for a day. [P1]
+20. **Screen burn-in / image retention.** A static layout 24/7 on a consumer
+    panel leaves marks over months. A 1-2 px drift of the whole frame every
+    few minutes is invisible and prevents it. **(ask)** [P4]
+
+### Tier 4: appliance and repo hygiene
+
+21. **No clean shutdown.** SIGTERM from systemd kills mid-frame; the `stopping`
+    event in `app.py` is created and never set. Add signal handlers. [P4]
+22. **Config errors crash with a KeyError** and `quiet_hours` strings are
+    re-parsed every frame. Validate once at load with readable messages. [P1]
+23. **`git pull` deploys will fight local edits.** Once `tools/update.sh`
+    exists, any tweak made to `config.toml` on the Pi blocks the pull. A
+    git-ignored `config.local.toml` overlay solves that and keeps private
+    values (a house location, a LAN receiver address) out of the repo. [P1]
+24. **The systemd unit doesn't match the device.** `aircraft.service` is a
+    system unit set up for kmsdrm, but the Pi runs the app inside a labwc
+    session. Phase 4 replaces it with a user service that belongs to the
+    graphical session. [P4]
+25. **`USER_AGENT` is copy-pasted in three files**; one constant. [P1]
+26. **Replay isn't Kona.** `sample_response.json` is Seattle traffic shifted
+    onto Hawaii and jittered randomly, so it can't exercise arrivals,
+    departures, or dead reckoning. Replace with a scripted Kona scenario
+    (arrival on the 17 approach, departure, FL360 overflight, tour helicopter,
+    Hawaiian-on-ASA, every nasty case from Phase 0). [P0]
+27. **No preview tool.** CLAUDE.md asks for headless preview PNGs at 0/1/5/15
+    aircraft but nothing renders them. Add `tools/preview.py`. [P0]
+28. **Recorded live data must not be committed.** adsb.fi and airplanes.live
+    data is licensed for personal use; `data/fixtures/live/` goes in
+    `.gitignore` and committed fixtures are synthetic. [P0]
+
+### Ideas that would make it feel like a finished product
+
+Each is small, uses data already in the feed, and stays inside the three
+colours and the island palette. All **(ask)**, shown in preview PNGs first.
+
+- **Aircraft-shaped icons.** The feed's category field separates helicopters,
+  light props, and jets. The Big Island sky is full of tour helicopters; a
+  rotor icon for those and a slimmer prop icon for Cessnas makes the map
+  readable at a glance. Same three colours.
+- **Off-map pointers.** A small chevron on the map edge, in the movement
+  colour, for a tracked plane that is outside the map crop, so the table and
+  map never disagree.
+- **Runway in use.** Draw the KOA runway to scale and mark the landing
+  direction (17 or 35) from the METAR wind.
+- **12-hour clock option** (`2:05 PM`) for a household display, and a
+  sunrise/sunset based dim instead of fixed quiet hours.
+- **A "next arrival" line in the quiet state** is not possible without
+  schedule data and would risk wrong data, so it is deliberately left out.
 
 ---
 
