@@ -157,7 +157,7 @@ def test_stale_vehicle_anonymous_and_positionless_records_never_become_aircraft(
 
 
 def test_aircraft_beyond_the_configured_radius_are_dropped(cfg):
-    tracker = make_tracker(cfg)                       # radius 40 nm
+    tracker = make_tracker(cfg, radius_nm=40.0)
     near, far = rec("aaaaaa", lat=20.3), rec("bbbbbb", lat=20.5)     # 34 nm and 46 nm north
     out, _ = tracker.update([stamped(near), stamped(far)], 1000.0)
     assert [a.hex for a in out] == ["aaaaaa"]

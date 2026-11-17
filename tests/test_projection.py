@@ -27,9 +27,9 @@ def test_off_panel_positions_are_none():
     assert p.project(20.01, -156.0, margin=0.0) is None
 
 
-def test_shipped_bounds_are_reported_as_stretched_until_phase_3(cfg):
-    p = Projection(cfg.map_lat_min, cfg.map_lat_max, cfg.map_lon_min, cfg.map_lon_max, **PANEL)
-    assert p.stretch == pytest.approx(1.0, abs=0.40)
+def test_the_old_bounds_were_stretched_a_third():
+    old = Projection(18.85, 20.25, -156.35, -155.35, **PANEL)     # what main shipped with
+    assert old.stretch == pytest.approx(1.32, abs=0.02)
 
 
 def test_fit_bounds_gives_a_true_shape():

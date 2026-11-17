@@ -61,8 +61,13 @@ class SourceHealth:
     name: str
     ok: bool = False
     aircraft: int = 0            # records with a position in its last response
-    age_seconds: float | None = None    # since its last successful poll; None = never
+    last_ok: float | None = None # monotonic time of its last successful poll; None = never
     error: str = ""
+
+    def age(self, now: float) -> float | None:
+        """Seconds since this source last answered. Computed by the reader at
+        draw time, so a frozen fetch thread can't leave a dot stuck on green."""
+        return None if self.last_ok is None else max(0.0, now - self.last_ok)
 
 
 @dataclass(frozen=True)

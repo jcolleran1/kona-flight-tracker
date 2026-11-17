@@ -56,11 +56,9 @@ class _SourceState:
         self.last_attempt_ok = False
         self.count = 0
 
-    def health(self, now: float) -> SourceHealth:
-        return SourceHealth(
-            name=self.name, ok=self.last_attempt_ok, aircraft=self.count,
-            age_seconds=None if self.last_ok is None else now - self.last_ok,
-            error=self.last_error)
+    def health(self) -> SourceHealth:
+        return SourceHealth(name=self.name, ok=self.last_attempt_ok, aircraft=self.count,
+                            last_ok=self.last_ok, error=self.last_error)
 
 
 class FetchLoop:
@@ -124,7 +122,7 @@ class FetchLoop:
         self.state.publish(
             self.aircraft, featured_hex=self.featured_hex, ok=ok,
             fetched_at=max(stamps) if stamps else 0.0,
-            sources=[s.health(now) for s in self.sources],
+            sources=[s.health() for s in self.sources],
             weather=self.enricher.weather())
 
     def tick(self, should_publish=lambda: True) -> float:

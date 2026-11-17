@@ -22,7 +22,10 @@ def distance_value(nm: float, unit: str) -> float:
 
 
 def fmt_distance(nm: float, unit: str = "mi") -> str:
-    return f"{distance_value(nm, unit):.0f} {unit}"
+    value = distance_value(nm, unit)
+    if value < 0.5:
+        return f"<1 {unit}"           # "0 mi" reads like missing data
+    return f"{value:.0f} {unit}"
 
 
 def fmt_speed(kt: float | None, unit: str = "kt") -> str:

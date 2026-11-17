@@ -125,3 +125,13 @@ def test_without_a_metar_the_aircrafts_own_setting_is_used(nasty, cfg):
     from tests.helpers import FakeEnricher
     ac = track_one(cfg, nasty["a50007"], enricher=FakeEnricher(qnh=None))   # 9,200 / nav_qnh 1017.6
     assert ac.altitude_ft == pytest.approx(9200 + qnh_correction_ft(1017.6))
+
+
+def test_speed_and_distance_units():
+    from render.units import fmt_distance, fmt_speed
+    assert fmt_speed(430, "kt") == "430 kt"                 # decision 2: knots, like FR24
+    assert fmt_speed(430, "mph") == "495 mph" and fmt_speed(430, "kmh") == "796 km/h"
+    assert fmt_speed(None, "kt") == "---"
+    assert fmt_distance(10, "mi") == "12 mi"                # statute miles
+    assert fmt_distance(10, "nm") == "10 nm" and fmt_distance(10, "km") == "19 km"
+    assert fmt_distance(0.2, "mi") == "<1 mi"

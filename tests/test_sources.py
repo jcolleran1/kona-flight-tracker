@@ -51,7 +51,7 @@ def test_adsb_lol_parses_the_documented_v2_shape(served, cfg, monkeypatch):
     assert poll.source == "adsb_lol" and len(poll.aircraft) == 3
     assert poll.age_seconds == pytest.approx(0.8)          # `now` is in milliseconds
     now = poll.received_mono
-    out, _ = make_tracker(cfg).update(merge_polls([poll], now, 30.0), now)
+    out, _ = make_tracker(cfg, radius_nm=40.0).update(merge_polls([poll], now, 30.0), now)
     by = {a.flight: a for a in out}
     assert set(by) == {"AS1121", "RCH321"}                 # UPS34 is 40.7 nm out: past the radius
     assert by["AS1121"].airline == "Hawaiian Airlines" and by["AS1121"].source == "adsb_lol"

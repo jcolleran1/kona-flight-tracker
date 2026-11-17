@@ -1,15 +1,17 @@
 """Pygame renderer. Runs on the main thread.
 
 Split layout:
-  LEFT half  — Solari-style info: hero (nearest aircraft) + board table + status
-  RIGHT half — calibrated geographic map with live aircraft (see render/mapview)
-
-Display init order:
-  1. Whatever SDL picks by default (windowed dev on Windows/macOS/X)
-  2. kmsdrm (Raspberry Pi OS Lite, modern KMS driver)
-  3. fbcon (legacy framebuffer fallback)
+  LEFT half   featured flight, table of other traffic, status   (render/panel.py)
+  RIGHT half  the map with live aircraft                         (render/mapview.py)
 
 Never blocks on the network. Reads immutable snapshots from SharedState.
+
+Built for a Pi Zero 2 W. Each frame is first *described* (a list of draw
+operations per panel); a panel is only repainted when its description changed,
+and the screen is only updated where something was repainted. On a quiet
+frame, which is most of them, the cost is building two small tuples and
+comparing them. Quiet-hours dimming is baked into the cached layers rather
+than blended over the whole screen every frame.
 """
 from __future__ import annotations
 
@@ -20,39 +22,31 @@ import time
 import pygame
 
 from config import Config
-from enrich.geo import compass_point
-from enrich.motion import movement_color_key
-from render.theme import (
-    Theme, make_gradient, BG, AMBER, AMBER_DIM, AMBER_FAINT, WHITE_WARM,
-    GREEN, STALE, RED_DIM, TEAL, CORAL, SAND,
-)
-from render.timeutil import clock_is_set, fmt_clock, in_quiet_hours, local_now
-from render.units import fmt_distance, fmt_altitude, fmt_speed
 from render.mapview import MapView
+from render.panel import LeftPanel
+from render.theme import PRIMARY, SECONDARY, Theme, make_gradient, scale
+from render.timeutil import clock_is_set, fmt_clock, in_quiet_hours, local_now
 from state import Aircraft, SharedState, Snapshot
 
 log = logging.getLogger("render")
 
-PULSE_SECONDS = 1.2  # row brightness pulse duration after a row first appears
-
-PHASE_WORDS = {
-    "ground": "ON THE GROUND",
-    "arriving": "ARRIVING",
-    "departing": "DEPARTING",
-    "overflight": "OVERFLIGHT",
-    "local": "IN THE AREA",
-}
-ACCENTS = {"ground": SAND, "toward": TEAL, "away": CORAL}
-
-
-def accent_for(ac: Aircraft) -> tuple[int, int, int]:
-    return ACCENTS[movement_color_key(ac.phase, ac.direction)]
+WATCHDOG_REFIRE_SECONDS = 60
+NIGHT_FPS = 2          # nobody is watching at 3 am; halve the work
 
 
 def live_aircraft(snap: Snapshot, now: float, max_age: float) -> list[Aircraft]:
     """Aircraft whose position is still fresh. Applied at draw time, so a dead
     network connection can never leave ghosts frozen on the wall."""
     return [a for a in snap.aircraft if now - a.pos_mono <= max_age]
+
+
+def pick_featured(snap: Snapshot, aircraft: list[Aircraft]) -> Aircraft | None:
+    """The fetch thread's pick if it is still live; otherwise the nearest live
+    aircraft (airborne before parked), so the panel never features a ghost."""
+    for a in aircraft:
+        if a.hex == snap.featured_hex:
+            return a
+    return min(aircraft, key=lambda a: (a.on_ground, a.distance_nm)) if aircraft else None
 
 
 class Renderer:
@@ -63,13 +57,15 @@ class Renderer:
         self._last_watchdog_fire = 0.0
         self._started = time.monotonic()
         self._last_frame_error = 0.0
-        self._row_seen: dict[str, tuple[str, float]] = {}  # hex -> (row text, change time)
         self.screen: pygame.Surface | None = None
         self.theme: Theme | None = None
         self.mapview: MapView | None = None
+        self.left: LeftPanel | None = None
         self.panel_w = 0  # width of the left info panel
         self._bg: pygame.Surface | None = None
-        self._dim_overlay: pygame.Surface | None = None
+        self._last_map: tuple | None = None
+        self._showing = ""         # "splash" or "board": what is currently on screen
+        self.frames_painted = 0    # for tests and the hourly log line
 
     # ---------- setup ----------
 
@@ -87,10 +83,10 @@ class Renderer:
                 self.screen = pygame.display.set_mode(
                     (self.cfg.width, self.cfg.height), flags
                 )
-                pygame.display.set_caption("Flight Tracker")
+                pygame.display.set_caption("Kona Flight Tracker")
                 pygame.mouse.set_visible(False)
                 log.info("display up via driver=%s at %dx%d",
-                         drv or "default", *self.screen.get_size())
+                         pygame.display.get_driver(), *self.screen.get_size())
                 break
             except pygame.error as e:
                 last_err = e
@@ -101,226 +97,68 @@ class Renderer:
         w, h = self.screen.get_size()
         self.theme = Theme(h)
         self.panel_w = w // 2 if self.cfg.map_enabled else w
+        self._bg = make_gradient(w, h).convert()
+        self.left = LeftPanel(self.cfg, self.theme, self.panel_w, h, self._bg)
         if self.cfg.map_enabled:
             self.mapview = MapView(self.cfg, w, h, self.theme)
-        self._bg = make_gradient(w, h)
-        self._dim_overlay = pygame.Surface((w, h))
-        self._dim_overlay.fill((0, 0, 0))
 
-    # ---------- full-screen states ----------
+    # ---------- what to show ----------
 
-    def draw_splash(self) -> None:
+    def brightness(self) -> float:
+        return self.cfg.quiet_brightness if in_quiet_hours(self.cfg) else 1.0
+
+    def _clock_texts(self) -> tuple[str, str]:
+        """(date, time) for the status strip; blank until the system clock is set."""
+        if not clock_is_set():
+            return "", ""
+        now = local_now(self.cfg)
+        return now.strftime("%a %b %-d").upper(), fmt_clock(now, self.cfg.clock_24h)
+
+    # ---------- drawing ----------
+
+    def draw_splash(self, brightness: float = 1.0) -> list[pygame.Rect]:
+        if self._showing == "splash":
+            return []
         t, s = self.theme, self.screen
         s.blit(self._bg, (0, 0))
         w, h = s.get_size()
-        t.blit_text(s, "KONA SKIES", t.splash, AMBER, (w // 2, int(h * 0.42)), "center")
-        t.blit_text(s, "WATCHING FOR AIRCRAFT . . .", t.status, AMBER_DIM,
+        t.blit_text(s, "KONA SKIES", t.splash, scale(PRIMARY, brightness),
+                    (w // 2, int(h * 0.42)), "center")
+        t.blit_text(s, "WATCHING FOR AIRCRAFT . . .", t.small, scale(SECONDARY, brightness),
                     (w // 2, int(h * 0.55)), "center")
+        self._showing = "splash"
+        return [s.get_rect()]
 
-    # ---------- left panel ----------
-
-    def draw_left(self, aircraft: list[Aircraft], featured: Aircraft | None) -> None:
-        if featured is not None:
-            self._draw_hero(featured)
-            rest = [a for a in aircraft if a.hex != featured.hex]
-            self._draw_rows(rest)
-        else:
-            self._draw_quiet_left()
-
-    def _draw_quiet_left(self) -> None:
-        t, s = self.theme, self.screen
-        u, pw = t.u, self.panel_w
-        t.blit_text(s, "QUIET SKIES", t.hero_mid, AMBER_DIM, (pw // 2, int(360 * u)), "center")
-        if clock_is_set():
-            t.blit_text(s, fmt_clock(local_now(self.cfg), self.cfg.clock_24h), t.clock_big,
-                        AMBER, (pw // 2, int(440 * u)), "center")
-        t.blit_text(s, "NO AIRCRAFT IN RANGE", t.status, AMBER_FAINT,
-                    (pw // 2, int(600 * u)), "center")
-
-    def _draw_hero(self, ac: Aircraft) -> None:
-        t, s = self.theme, self.screen
-        u = t.u
-        pad = int(46 * u)
-
-        t.blit_text(s, (ac.label or "UNKNOWN")[:12], t.hero_callsign, WHITE_WARM,
-                    (pad, int(18 * u)))
-
-        ident = " / ".join(x for x in (ac.airline, ac.type_name or ac.type_code) if x)
-        if ident:
-            t.blit_text(s, ident.upper()[:34], t.hero_mid, AMBER, (pad, int(140 * u)))
-
-        stat_y = int(212 * u)
-        t.blit_text(s, "ALTITUDE", t.hero_label, AMBER_DIM, (pad, stat_y))
-        t.blit_text(s, self._altitude_text(ac), t.hero_big, AMBER, (pad, stat_y + int(30 * u)))
-        spd_x = pad + int(420 * u)
-        t.blit_text(s, "GROUND SPEED", t.hero_label, AMBER_DIM, (spd_x, stat_y))
-        t.blit_text(s, fmt_speed(ac.ground_speed_kt, self.cfg.speed_units),
-                    t.hero_big, AMBER, (spd_x, stat_y + int(30 * u)))
-
-        dist_y = int(322 * u)
-        dist_txt = (f"{fmt_distance(ac.distance_nm, self.cfg.distance_units)} "
-                    f"{compass_point(ac.bearing_deg)} FROM {self.cfg.airport_iata}")
-        r = t.blit_text(s, dist_txt + "   ·   ", t.hero_small, AMBER, (pad, dist_y))
-        t.blit_text(s, PHASE_WORDS[ac.phase], t.hero_small, accent_for(ac), (r.right, dist_y))
-
-        rule_y = int(386 * u)
-        pygame.draw.line(s, AMBER_FAINT, (pad, rule_y),
-                         (self.panel_w - pad, rule_y), max(1, int(2 * u)))
-
-    def _draw_rows(self, aircraft: list[Aircraft]) -> None:
-        t, s = self.theme, self.screen
-        h = s.get_height()
-        u, pw = t.u, self.panel_w
-        pad = int(46 * u)
-        top = int(406 * u)
-        row_h = int(62 * u)
-        status_h = int(72 * u)
-
-        # Three columns only — flight, airline, altitude. Roomy now.
-        x_flight = pad
-        x_airline = pad + int(210 * u)
-        x_alt = pw - pad           # right-aligned anchor
-
-        t.blit_text(s, "FLIGHT", t.header, AMBER_FAINT, (x_flight, top))
-        t.blit_text(s, "AIRLINE", t.header, AMBER_FAINT, (x_airline, top))
-        t.blit_text(s, "ALTITUDE", t.header, AMBER_FAINT, (x_alt, top), "right")
-        top += int(42 * u)
-
-        max_rows = min(self.cfg.max_rows, (h - status_h - top) // row_h)
-        now = time.monotonic()
-        for ac in aircraft[:max_rows]:
-            # pulse a row once, when the aircraft first shows up in the table
-            seen = self._row_seen.setdefault(ac.hex, ("", now))
-            color = WHITE_WARM if (now - seen[1]) < PULSE_SECONDS else AMBER
-
-            t.blit_text(s, (ac.label or "—")[:8], t.row_bold, color, (x_flight, top))
-            t.blit_text(s, (ac.airline or "—")[:18].upper(), t.row, color, (x_airline, top))
-            t.blit_text(s, self._altitude_text(ac), t.row, color, (x_alt, top), "right")
-
-            ry = top + row_h - int(14 * u)
-            pygame.draw.line(s, AMBER_FAINT, (pad, ry), (pw - pad, ry), 1)
-            top += row_h
-
-        live = {a.hex for a in aircraft}
-        for k in list(self._row_seen):
-            if k not in live:
-                del self._row_seen[k]
-
-    # ---------- status strip (left panel) ----------
-
-    def _draw_status(self, snap: Snapshot, reconnecting: bool, count: int,
-                     mono: float) -> None:
-        t, s = self.theme, self.screen
-        h = s.get_height()
-        u, pw = t.u, self.panel_w
-        pad = int(46 * u)
-        y = h - int(46 * u)
-
-        if clock_is_set():
-            now = local_now(self.cfg)
-            t.blit_text(s, now.strftime("%a %b %d   ") + fmt_clock(now, self.cfg.clock_24h, True),
-                        t.status, AMBER_DIM, (pad, y))
-
-        if snap.fetched_at:
-            age = max(0, int(mono - snap.fetched_at))
-            mid = f"{count} AIRCRAFT · {age}s"
-        else:
-            mid = "WAITING . . ."
-        if reconnecting:
-            mid = "RECONNECTING · " + mid
-
-        stale = snap.fetched_at and (mono - snap.fetched_at) > self.cfg.stale_after_seconds
-        dot_color = GREEN if (snap.ok and not stale) else STALE
-        if reconnecting:
-            dot_color = RED_DIM
-        dot_x = pw - pad - int(8 * u)
-        t.blit_text(s, mid, t.status, RED_DIM if reconnecting else AMBER_DIM,
-                    (dot_x - int(20 * u), y), "right")
-        pygame.draw.circle(s, dot_color, (dot_x, y + int(14 * u)), int(8 * u))
-
-    # ---------- route banner (right panel, top) ----------
-
-    def _draw_route_banner(self, featured: Aircraft | None) -> None:
-        t, s = self.theme, self.screen
-        u = t.u
-        w = s.get_width()
-        x0 = self.panel_w
-        bh = int(116 * u)
-        pad = int(34 * u)
-
-        # translucent island-dark band so it reads over the ocean
-        band = pygame.Surface((w - x0, bh), pygame.SRCALPHA)
-        band.fill((10, 26, 32, 200))
-        s.blit(band, (x0, 0))
-        pygame.draw.line(s, AMBER_FAINT, (x0, bh), (w, bh), max(1, int(2 * u)))
-
-        if featured is None:
-            t.blit_text(s, "KONA · KOA", t.hero_mid, AMBER, (x0 + pad, int(34 * u)))
-            t.blit_text(s, "KAILUA-KONA, HAWAII", t.hero_label, AMBER_DIM,
-                        (x0 + pad, int(82 * u)))
-            return
-
-        phase = featured.phase
-        callsign = featured.label or "UNKNOWN"
-        accent, word = accent_for(featured), PHASE_WORDS[phase]
-        name = self.cfg.airport_name.upper()
-        origin = self._route_place(featured, end="origin")
-        dest = self._route_place(featured, end="dest")
-
-        if phase == "departing":
-            tail = f"TO {dest}" if dest else f"LEAVING {name}"
-            self._banner_triangle(x0 + pad, int(40 * u), accent, up=True)
-        elif phase == "arriving":
-            tail = f"FROM {origin}" if origin else f"INBOUND TO {name}"
-            self._banner_triangle(x0 + pad, int(40 * u), accent, up=False)
-        elif phase == "ground":
-            tail = f"AT {name} INTERNATIONAL" if featured.distance_nm <= 3 else ""
-        else:  # overflight / local: a route if we trust one, else just the heading
-            if origin and dest:
-                tail = f"{origin} TO {dest}"
-            else:
-                tail = "HEADING " + ("TOWARD " if featured.direction == "toward" else "AWAY FROM ") + name
-
-        tx = x0 + pad + int(40 * u)
-        line1 = t.blit_text(s, word, t.hero_small, accent, (tx, int(20 * u)))
-        t.blit_text(s, callsign, t.hero_mid, WHITE_WARM, (line1.right + int(20 * u), int(14 * u)))
-        t.blit_text(s, tail, t.hero_small, AMBER, (tx, int(66 * u)))
-
-    def _banner_triangle(self, cx, cy, color, up: bool) -> None:
-        u = self.theme.u
-        r = int(13 * u)
-        if up:
-            pts = [(cx, cy - r), (cx - r, cy + r), (cx + r, cy + r)]
-        else:
-            pts = [(cx, cy + r), (cx - r, cy - r), (cx + r, cy - r)]
-        pygame.draw.polygon(self.screen, color, pts)
-
-    @staticmethod
-    def _route_place(ac: Aircraft, end: str) -> str:
-        name = ac.origin_name if end == "origin" else ac.dest_name
-        code = ac.origin_code if end == "origin" else ac.dest_code
-        if name and code:
-            return f"{name} ({code})"
-        return name or code or ""
-
-    # ---------- compose a full frame ----------
-
-    def draw_frame(self, snap: Snapshot, reconnecting: bool, now: float | None = None) -> None:
+    def draw_frame(self, snap: Snapshot, reconnecting: bool, now: float | None = None,
+                   brightness: float = 1.0, force: bool = False) -> list[pygame.Rect]:
+        """Bring the screen up to date for `snap` at monotonic time `now`.
+        Returns the rectangles that were repainted (empty = nothing changed)."""
         s = self.screen
         now = time.monotonic() if now is None else now
-        s.blit(self._bg, (0, 0))
+        if self._showing != "board":
+            force, self._showing = True, "board"
+
         aircraft = live_aircraft(snap, now, self.cfg.max_position_age_seconds)
-        featured = next((a for a in aircraft if a.hex == snap.featured_hex), None)
-        if featured is None and aircraft:
-            # the featured flight just aged out; fall back to the nearest live one
-            featured = min(aircraft, key=lambda a: (a.on_ground, a.distance_nm))
-        self.draw_left(aircraft, featured)
-        self._draw_status(snap, reconnecting, len(aircraft), now)
+        featured = pick_featured(snap, aircraft)
+        date_text, clock_text = self._clock_texts()
+        dirty: list[pygame.Rect] = []
+
+        ops = self.left.build(aircraft, featured, snap, now, date_text=date_text,
+                              clock_text=clock_text, reconnecting=reconnecting)
+        if self.left.render(ops, brightness) or force:
+            s.blit(self.left.surface, (0, 0))
+            dirty.append(pygame.Rect(0, 0, self.panel_w, s.get_height()))
+
         if self.mapview is not None:
-            self.mapview.draw(s, aircraft, featured.hex if featured else None, now)
-            pygame.draw.line(s, AMBER_FAINT, (self.panel_w, 0),
-                             (self.panel_w, s.get_height()), max(1, int(2 * self.theme.u)))
-            self._draw_route_banner(featured)
+            draw_list = (self.mapview.build(aircraft, featured.hex if featured else None, now),
+                         round(brightness, 3))
+            if draw_list != self._last_map or force:
+                self._last_map = draw_list
+                self.mapview.paint(s, draw_list[0], brightness)
+                dirty.append(self.mapview.rect)
+        if dirty:
+            self.frames_painted += 1
+        return dirty
 
     # ---------- main loop ----------
 
@@ -338,38 +176,31 @@ class Renderer:
             snap = self.state.read()
             now = time.monotonic()
             age = (now - snap.fetched_at) if snap.fetched_at else None
-            stale = age is not None and age > self.cfg.stale_after_seconds
-            dead = (age if age is not None else now - self._started) > self.cfg.watchdog_seconds
+            silent_for = age if age is not None else now - self._started
+            dead = silent_for > self.cfg.watchdog_seconds
 
-            if dead and self.on_watchdog and (now - self._last_watchdog_fire) > 60:
+            if dead and self.on_watchdog and \
+                    (now - self._last_watchdog_fire) > WATCHDOG_REFIRE_SECONDS:
                 self._last_watchdog_fire = now
                 log.error("watchdog: no fresh data for %ds -- requesting fetch restart",
-                          int(age if age is not None else now - self._started))
+                          int(silent_for))
                 self.on_watchdog()
 
+            brightness = self.brightness()
             try:
-                if not snap.fetched_at:
-                    self.draw_splash()
+                if not snap.last_attempt_at and not dead:
+                    dirty = self.draw_splash(brightness)
                 else:
-                    self.draw_frame(snap, dead, now)
+                    dirty = self.draw_frame(snap, dead, now, brightness)
             except Exception:
                 # A bad frame must never take the wall down. Log it (at most
-                # once a minute) and try again next frame.
+                # once a minute), force a clean repaint next time, carry on.
                 if now - self._last_frame_error > 60 or not self._last_frame_error:
                     self._last_frame_error = now
                     log.exception("error drawing frame; continuing")
-                self.screen.blit(self._bg, (0, 0))
+                self._showing, self._last_map = "", None
+                dirty = []
 
-            dim = 0.0
-            if in_quiet_hours(self.cfg):
-                dim = max(dim, 1.0 - self.cfg.quiet_brightness)
-            if dim > 0:
-                self._dim_overlay.set_alpha(int(dim * 255))
-                self.screen.blit(self._dim_overlay, (0, 0))
-
-            pygame.display.flip()
-            clock.tick(self.cfg.fps)
-
-    def _altitude_text(self, ac: Aircraft) -> str:
-        return fmt_altitude(ac.altitude_ft, ac.on_ground, self.cfg.altitude_units,
-                            phase=ac.phase, vertical_rate_fpm=ac.vertical_rate_fpm)
+            if dirty:
+                pygame.display.update(dirty)
+            clock.tick(NIGHT_FPS if brightness < 0.999 else self.cfg.fps)

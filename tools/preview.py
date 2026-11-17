@@ -3,6 +3,9 @@
 
     python3 tools/preview.py                     # 0, 1, 5 and 15 aircraft
     python3 tools/preview.py --count 15 --at 420 # one frame, 7 min into the scenario
+    python3 tools/preview.py --count 15 --night  # quiet-hours brightness
+    python3 tools/preview.py --count 15 --no-data --name nodata
+    python3 tools/preview.py --count 15 --icon-shapes --name shapes
     python3 tools/preview.py --out previews/     # where the PNGs go (default)
 
 Uses the bundled replay scenario and the real fetch -> enrich -> render path, so
@@ -81,14 +84,18 @@ def build_snapshot(cfg, at: float, count: int | None, warmup: float = 240.0):
     return state.read(), clock.t
 
 
-def render(cfg, at: float, count: int | None, out: Path) -> Path:
+def render(cfg, at: float, count: int | None, out: Path, *, night: bool = False,
+           no_data: bool = False) -> Path:
     from render.renderer import Renderer
     from state import SharedState
 
     snap, now = build_snapshot(cfg, at, count)
     renderer = Renderer(cfg, SharedState())
     renderer.init_display()
-    renderer.draw_frame(snap, False, now + 1.0)   # one second after the last poll
+    if no_data:
+        now += 300.0          # five minutes with nothing from any source
+    renderer.draw_frame(snap, no_data, now + 1.0, force=True,
+                        brightness=cfg.quiet_brightness if night else 1.0)
     out.parent.mkdir(parents=True, exist_ok=True)
     pygame.image.save(renderer.screen, str(out))
     pygame.display.quit()
@@ -99,14 +106,25 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--count", type=int, action="append",
                     help="number of aircraft (repeatable); default 0, 1, 5, 15")
-    ap.add_argument("--at", type=float, default=420.0,
-                    help="seconds into the scenario (default 420)")
+    ap.add_argument("--at", type=float, default=460.0,
+                    help="seconds into the scenario (default 460)")
     ap.add_argument("--out", type=Path, default=ROOT / "previews")
+    ap.add_argument("--icon-shapes", action="store_true",
+                    help="helicopter / light-prop silhouettes ([map] icon_shapes = true)")
+    ap.add_argument("--night", action="store_true", help="quiet-hours brightness")
+    ap.add_argument("--no-data", action="store_true", help="what a dead connection looks like")
+    ap.add_argument("--clock-12h", action="store_true", help="12-hour clock")
+    ap.add_argument("--name", default="preview", help="file name prefix")
     args = ap.parse_args()
 
-    cfg = dataclasses.replace(load_config(), sources=("replay",), fullscreen=False)
+    cfg = dataclasses.replace(load_config(local=False), sources=("replay",), fullscreen=False)
+    if args.icon_shapes:
+        cfg = dataclasses.replace(cfg, icon_shapes=True)
+    if args.clock_12h:
+        cfg = dataclasses.replace(cfg, clock_24h=False)
     for n in (args.count or DEFAULT_COUNTS):
-        path = render(cfg, args.at, n, args.out / f"preview-{n:02d}.png")
+        path = render(cfg, args.at, n, args.out / f"{args.name}-{n:02d}.png",
+                      night=args.night, no_data=args.no_data)
         print(f"wrote {path}")
     return 0
 

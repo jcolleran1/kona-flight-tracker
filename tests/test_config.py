@@ -53,7 +53,7 @@ def test_map_bounds_contain_home(cfg):
     ('start = "22:00"', 'start = "10pm"', "start"),
     ('sources = ["airplanes_live", "adsb_fi"]', 'sources = ["flightradar"]', "flightradar"),
     ('sources = ["airplanes_live", "adsb_fi"]', 'sources = ["replay", "adsb_fi"]', "replay"),
-    ("lat_max = 20.25", "lat_max = 10.0", "lat_min"),
+    ("lat_max = 20.5000", "lat_max = 10.0", "lat_min"),
     ("lat = 19.7388", "lat = 197.388", "lat"),
 ])
 def test_bad_values_give_a_readable_error(write, old, new, needle):

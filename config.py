@@ -101,9 +101,12 @@ class Config:
     plane_icon: str
     plane_size: int
     show_range_rings: bool
-    range_ring_nm: float
+    range_ring_step: float      # in [display] distance_units
     show_home: bool
     show_labels: bool
+    show_trails: bool
+    show_offmap_pointers: bool
+    icon_shapes: bool
 
     # Kept so older call sites and docs that say "cfg.source" keep working.
     @property
@@ -284,9 +287,12 @@ def load_config(path: Path | None = None, local: Path | None | bool = None) -> C
         plane_icon=mp.text("plane_icon", "plane.png"),
         plane_size=mp.num("plane_size", 34, 8, 200, integer=True),
         show_range_rings=mp.flag("show_range_rings", True),
-        range_ring_nm=mp.num("range_ring_nm", 10, 1, 250),
+        range_ring_step=mp.num("range_ring_step", mp.num("range_ring_nm", 10, 1, 250), 1, 250),
         show_home=mp.flag("show_home", True),
         show_labels=mp.flag("show_labels", True),
+        show_trails=mp.flag("show_trails", True),
+        show_offmap_pointers=mp.flag("show_offmap_pointers", True),
+        icon_shapes=mp.flag("icon_shapes", False),
     )
     if "local" in cfg.sources and not cfg.local_url.startswith(("http://", "https://")):
         raise ConfigError("[local_receiver] url must start with http:// or https://")

@@ -50,7 +50,7 @@ Ask these up front; don't guess.
 | 0 Safety net | done | `python3 -m pytest -q`; scripted Kona scenario replaces the Seattle sample |
 | 1 Data correctness | done | see below |
 | 2 Coverage | done (code) | airplanes.live + adsb.fi merged by default; adsb.lol and local receiver written, off |
-| 3 UI polish | not started | previews go to Josh before anything is final |
+| 3 UI polish | built, awaiting Josh's OK | previews in `previews/`; nothing here is final until approved |
 | 4 Appliance hardening | not started | |
 | 5 Optional extras | not started | |
 
@@ -96,6 +96,42 @@ Ask these up front; don't guess.
 - Per-source health is in every snapshot; the status strip draws it in Phase 3.
 - Found on live data while testing: adsbdb returns a bare `692` as the "IATA"
   flight for operators with no IATA code. Fixed and pinned by a test.
+
+**Phase 3 as built (not final until Josh approves the previews):**
+
+- Basemap baked by `tools/make_map.py` from Natural Earth 1:10m land polygons
+  (public domain), lightly smoothed; runways to scale from OurAirports (public
+  domain); towns and summits labelled. Natural Earth has about one vertex per
+  3 km on this coast. `--land` accepts any more detailed GeoJSON (US Census
+  cartographic boundaries or an OSM coastline extract) without code changes.
+- Bounds are aspect-correct: 108 nm tall, 96 nm wide, exactly 10 px per nm, the
+  whole island in frame with KOA at about 27% from the left. Range rings are
+  circles, drawn in the display's distance unit and labelled. `radius_nm` went
+  from 40 to 60 so the feed covers what the map shows.
+- The route banner across the top of the map is gone: the featured panel now
+  carries the route (`HNL -> KOA` with city names), so the banner only repeated
+  it and covered the north coast.
+- Left panel: phase line, IATA flight number with the broadcast callsign small
+  beside it, airline, type and tail, route (or what the aircraft's own motion
+  says when no route is trusted), altitude with a climb/descent arrow, speed in
+  knots, distance "FROM KOA". Table: colour pip, flight, route (or airline /
+  type when there is no route), altitude. Rows are ordered Kona arrivals,
+  departures, other traffic, by first appearance, so they don't reshuffle.
+- Status strip: date and time (no seconds), one health dot per source with its
+  name and aircraft count. With no data it says NO FLIGHT DATA instead of
+  QUIET SKIES.
+- Map: trails, edge pointers for aircraft outside the crop, aircraft parked at
+  KOA drawn small and unlabelled so the airport isn't buried.
+- Cost: the left panel is redrawn only when its content changes (about once a
+  poll); the map only when something moved a pixel; quiet-hours dimming is
+  baked into the cached layers; 2 fps overnight.
+
+Waiting on Josh:
+1. Whole-island crop (default) or the tighter Kona-side crop (`crop-kona-15.png`).
+2. Aircraft-shaped icons for helicopters and light props (`shapes-15.png`,
+   `[map] icon_shapes = true`). Off by default.
+3. Banner removal, as described above.
+4. 12-hour clock (`[display] clock_24h = false`, shown in `takeoff-15.png`).
 
 ---
 
